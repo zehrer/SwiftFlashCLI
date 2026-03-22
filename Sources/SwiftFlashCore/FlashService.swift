@@ -4,6 +4,7 @@ public final class FlashService {
     private let scanner: DeviceScanning
     private let deviceManager: DeviceManaging
     private let writer: RawImageWriting
+    private let verifier: RawImageVerifying
     private let uuidService: UUIDMetadataService
     private let imageStore: ImageCatalogStore
     private let deviceStore: DeviceInventoryStore
@@ -13,6 +14,7 @@ public final class FlashService {
         scanner: DeviceScanning,
         deviceManager: DeviceManaging,
         writer: RawImageWriting,
+        verifier: RawImageVerifying,
         uuidService: UUIDMetadataService,
         imageStore: ImageCatalogStore,
         deviceStore: DeviceInventoryStore,
@@ -21,6 +23,7 @@ public final class FlashService {
         self.scanner = scanner
         self.deviceManager = deviceManager
         self.writer = writer
+        self.verifier = verifier
         self.uuidService = uuidService
         self.imageStore = imageStore
         self.deviceStore = deviceStore
@@ -30,10 +33,14 @@ public final class FlashService {
     public func flash(
         image: ImageDescriptor,
         device: DiskCandidate,
-        progress: @escaping @Sendable (Double) -> Void
-    ) async throws {
+        writeProgress: @escaping @Sendable (Double) -> Void,
+        promptForVerification: @escaping @Sendable () async throws -> Bool,
+        verifyProgress: @escaping @Sendable (Double) -> Void
+    ) async throws -> FlashCompletion {
         let startedAt = Date()
-        let previousMetadata = uuidService.readExistingMetadata(from: device.partitions)
+        let previousIdentity = uuidService.resolveIdentity(for: device)
+        let previousMetadata = previousIdentity?.metadata
+        var didVerify = false
 
         do {
             guard image.size <= device.size else {
@@ -41,46 +48,68 @@ public final class FlashService {
             }
 
             try await deviceManager.unmountWholeDisk(device)
-            try writer.writeImage(from: image.url, to: device.rawDevicePath, progress: progress)
+            try writer.writeImage(from: image.url, to: device.rawDevicePath, progress: writeProgress)
+
+            if try await promptForVerification() {
+                try verifier.verifyImage(
+                    from: image.url,
+                    to: device.rawDevicePath,
+                    progress: verifyProgress
+                )
+                didVerify = true
+            }
 
             let refreshed = try await rescanDevice(path: device.devicePath)
             let mounted = try await mountWritablePartitions(of: refreshed ?? device)
             let checksum = try? ImageSupport.calculateSHA256(for: image.url)
+            let deviceUUID = previousMetadata?.deviceUUID ?? UUID().uuidString
             let metadata = FlashUUIDMetadata(
                 flashUUID: UUID(),
-                physicalDeviceID: device.physicalDeviceID,
-                physicalDeviceName: device.displayName,
+                deviceUUID: deviceUUID,
+                deviceName: device.displayName,
                 imagePath: image.url.path,
                 imageName: image.name,
                 imageSHA256: checksum,
                 flashedAt: Date()
             )
-            let uuidWriteSucceeded = uuidService.writeMetadata(metadata, to: mounted)
+            let writeResult = uuidService.writeMetadata(
+                metadata,
+                imageSize: image.size,
+                to: refreshed ?? device,
+                mountedPartitions: mounted
+            )
 
             try imageStore.remember(image: ImageDescriptor(url: image.url, size: image.size, checksum: checksum))
-            try deviceStore.upsert(candidate: device, flashUUID: metadata.flashUUID)
+            try deviceStore.upsert(deviceUUID: deviceUUID, candidate: refreshed ?? device)
             try historyStore.upsertFlashMedia(
                 KnownFlashMedia(
-                    flashUUID: metadata.flashUUID,
+                    flashUUID: metadata.flashUUID ?? UUID(),
                     lastImagePath: image.url.path,
                     lastImageName: image.name,
-                    lastPhysicalDeviceID: device.physicalDeviceID,
+                    deviceUUID: deviceUUID,
                     flashedAt: metadata.flashedAt,
                     lastSeen: metadata.flashedAt
                 )
             )
+            let result = historyResult(writeResult: writeResult, verified: didVerify)
             try historyStore.add(
                 FlashHistoryEntry(
                     startedAt: startedAt,
                     finishedAt: Date(),
                     imagePath: image.url.path,
                     imageName: image.name,
-                    physicalDeviceID: device.physicalDeviceID,
+                    deviceUUID: deviceUUID,
                     previousFlashUUID: previousMetadata?.flashUUID,
                     newFlashUUID: metadata.flashUUID,
-                    uuidWriteSucceeded: uuidWriteSucceeded,
-                    result: uuidWriteSucceeded ? "success" : "success_without_uuid"
+                    uuidWriteSucceeded: writeResult.anyWritten,
+                    result: result
                 )
+            )
+            return FlashCompletion(
+                previousIdentity: previousIdentity,
+                metadata: metadata,
+                writeResult: writeResult,
+                verified: didVerify
             )
         } catch {
             try? historyStore.add(
@@ -89,7 +118,7 @@ public final class FlashService {
                     finishedAt: Date(),
                     imagePath: image.url.path,
                     imageName: image.name,
-                    physicalDeviceID: device.physicalDeviceID,
+                    deviceUUID: previousMetadata?.deviceUUID ?? "unknown",
                     previousFlashUUID: previousMetadata?.flashUUID,
                     newFlashUUID: nil,
                     uuidWriteSucceeded: false,
@@ -97,6 +126,23 @@ public final class FlashService {
                 )
             )
             throw error
+        }
+    }
+
+    public func verify(
+        image: ImageDescriptor,
+        device: DiskCandidate,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws {
+        guard image.size <= device.size else {
+            throw FlashError.imageTooLarge(imageSize: image.size, deviceSize: device.size)
+        }
+
+        try await deviceManager.unmountWholeDisk(device)
+        try verifier.verifyImage(from: image.url, to: device.rawDevicePath, progress: progress)
+
+        if let rescanned = try await rescanDevice(path: device.devicePath) {
+            _ = try await mountWritablePartitions(of: rescanned)
         }
     }
 
@@ -119,5 +165,24 @@ public final class FlashService {
             current = rescanned
         }
         return current.partitions
+    }
+
+    private func historyResult(writeResult: MetadataWriteResult, verified: Bool) -> String {
+        let metadataSuffix: String
+        switch (writeResult.fileWritten, writeResult.trailerWritten) {
+        case (true, true):
+            metadataSuffix = "metadata_file_and_trailer"
+        case (true, false):
+            metadataSuffix = "metadata_file_only"
+        case (false, true):
+            metadataSuffix = "metadata_trailer_only"
+        case (false, false):
+            metadataSuffix = "metadata_none"
+        }
+
+        if verified {
+            return "success_verified_\(metadataSuffix)"
+        }
+        return "success_\(metadataSuffix)"
     }
 }

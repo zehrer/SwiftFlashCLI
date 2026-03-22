@@ -1,6 +1,11 @@
 import Foundation
+import Darwin
 
 public final class UUIDMetadataService {
+    public static let trailerBlockSize = 4096
+    public static let minimumTrailerSlack = 1024 * 1024
+    private static let trailerMagic = "SWFLASH-TRAILER-V1\n"
+
     public init() {}
 
     public func readExistingMetadata(from partitions: [PartitionVolume]) -> FlashUUIDMetadata? {
@@ -15,7 +20,90 @@ public final class UUIDMetadataService {
         return nil
     }
 
+    public func readExistingMetadata(from device: DiskCandidate) -> FlashUUIDMetadata? {
+        resolveIdentity(for: device)?.metadata
+    }
+
+    public func resolveIdentity(for device: DiskCandidate) -> ResolvedDeviceIdentity? {
+        if let metadata = readExistingMetadata(from: device.partitions) {
+            return ResolvedDeviceIdentity(metadata: metadata, source: .file)
+        }
+        if let metadata = readTrailerMetadata(fromDevicePath: device.rawDevicePath, deviceSize: device.size) {
+            return ResolvedDeviceIdentity(metadata: metadata, source: .trailer)
+        }
+        return nil
+    }
+
+    public func ensureDeviceIdentity(for device: DiskCandidate) -> ResolvedDeviceIdentity? {
+        if let identity = resolveIdentity(for: device) {
+            return identity
+        }
+
+        let metadata = FlashUUIDMetadata(
+            flashUUID: nil,
+            deviceUUID: UUID().uuidString,
+            deviceName: device.displayName,
+            imagePath: "",
+            imageName: "",
+            imageSHA256: nil,
+            flashedAt: Date()
+        )
+
+        guard writeFileMetadata(metadata, to: device.partitions) else {
+            return nil
+        }
+        return ResolvedDeviceIdentity(metadata: metadata, source: .created)
+    }
+
+    public func readTrailerMetadata(fromDevicePath devicePath: String, deviceSize: Int64) -> FlashUUIDMetadata? {
+        guard deviceSize >= Int64(Self.trailerBlockSize) else {
+            return nil
+        }
+
+        let fd = open(devicePath, O_RDONLY)
+        guard fd >= 0 else {
+            return nil
+        }
+        defer { close(fd) }
+
+        let offset = off_t(deviceSize - Int64(Self.trailerBlockSize))
+        var buffer = [UInt8](repeating: 0, count: Self.trailerBlockSize)
+        let bytesRead = pread(fd, &buffer, Self.trailerBlockSize, offset)
+        guard bytesRead > 0 else {
+            return nil
+        }
+
+        let data = Data(buffer.prefix(Int(bytesRead)))
+        guard data.starts(with: Data(Self.trailerMagic.utf8)) else {
+            return nil
+        }
+
+        let payload = data.dropFirst(Self.trailerMagic.utf8.count)
+        let trimmed = payload.prefix { $0 != 0 }
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        return try? JSONCoding.decoder.decode(FlashUUIDMetadata.self, from: Data(trimmed))
+    }
+
     public func writeMetadata(
+        _ metadata: FlashUUIDMetadata,
+        imageSize: Int64,
+        to device: DiskCandidate,
+        mountedPartitions: [PartitionVolume]
+    ) -> MetadataWriteResult {
+        let fileWritten = writeFileMetadata(metadata, to: mountedPartitions)
+        let trailerWritten = writeTrailerMetadata(
+            metadata,
+            imageSize: imageSize,
+            toDevicePath: device.rawDevicePath,
+            deviceSize: device.size
+        )
+        return MetadataWriteResult(fileWritten: fileWritten, trailerWritten: trailerWritten)
+    }
+
+    private func writeFileMetadata(
         _ metadata: FlashUUIDMetadata,
         to partitions: [PartitionVolume]
     ) -> Bool {
@@ -33,5 +121,56 @@ public final class UUIDMetadataService {
         } catch {
             return false
         }
+    }
+
+    private func writeTrailerMetadata(
+        _ metadata: FlashUUIDMetadata,
+        imageSize: Int64,
+        toDevicePath devicePath: String,
+        deviceSize: Int64
+    ) -> Bool {
+        let slack = deviceSize - imageSize
+        guard slack >= Int64(Self.minimumTrailerSlack),
+              deviceSize >= Int64(Self.trailerBlockSize)
+        else {
+            return false
+        }
+
+        guard let payload = try? JSONCoding.encoder.encode(metadata) else {
+            return false
+        }
+
+        let maxPayloadSize = Self.trailerBlockSize - Self.trailerMagic.utf8.count
+        guard payload.count <= maxPayloadSize else {
+            return false
+        }
+
+        var block = Data(count: Self.trailerBlockSize)
+        block.replaceSubrange(0..<Self.trailerMagic.utf8.count, with: Data(Self.trailerMagic.utf8))
+        let payloadStart = Self.trailerMagic.utf8.count
+        block.replaceSubrange(payloadStart..<(payloadStart + payload.count), with: payload)
+
+        let fd = open(devicePath, O_WRONLY)
+        guard fd >= 0 else {
+            return false
+        }
+        defer { close(fd) }
+
+        let offset = off_t(deviceSize - Int64(Self.trailerBlockSize))
+        let bytesWritten = block.withUnsafeBytes { rawBuffer in
+            pwrite(fd, rawBuffer.baseAddress, Self.trailerBlockSize, offset)
+        }
+        guard bytesWritten == Self.trailerBlockSize else {
+            return false
+        }
+
+        if fsync(fd) != 0 {
+            return false
+        }
+
+        #if os(macOS)
+        _ = fcntl(fd, F_FULLFSYNC)
+        #endif
+        return true
     }
 }

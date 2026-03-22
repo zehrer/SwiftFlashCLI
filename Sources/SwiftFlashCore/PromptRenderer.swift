@@ -1,6 +1,6 @@
 import Foundation
 
-public final class PromptRenderer {
+public final class PromptRenderer: @unchecked Sendable {
     public init() {}
 
     public func selectImage(from images: [RememberedImage]) throws -> String {
@@ -70,6 +70,12 @@ public final class PromptRenderer {
         print("About to erase \(device.displayName) (\(device.devicePath), \(device.formattedSize))")
         print("Image: \(image.url.path) (\(ByteCountFormatter.string(fromByteCount: image.size, countStyle: .file)))")
         print("Continue? [y/N]")
+        let answer = readLine(strippingNewline: true)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return answer == "y" || answer == "yes"
+    }
+
+    public func confirmVerifyAfterFlash() -> Bool {
+        print("Flash write complete. Verify the flashed image now before metadata is written? [y/N]")
         let answer = readLine(strippingNewline: true)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return answer == "y" || answer == "yes"
     }

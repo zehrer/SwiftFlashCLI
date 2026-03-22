@@ -113,32 +113,20 @@ public final class DeviceInventoryStore {
         configStore.currentConfig().knownPhysicalDevices.sorted { $0.lastSeen > $1.lastSeen }
     }
 
-    public func upsert(candidate: DiskCandidate, flashUUID: UUID? = nil) throws {
+    public func upsert(deviceUUID: String, candidate: DiskCandidate) throws {
         try configStore.update { config in
             let now = Date()
-            if let index = config.knownPhysicalDevices.firstIndex(where: { $0.physicalDeviceID == candidate.physicalDeviceID }) {
-                config.knownPhysicalDevices[index].lastSeenSystemName = candidate.displayName
-                config.knownPhysicalDevices[index].vendor = candidate.vendor
-                config.knownPhysicalDevices[index].model = candidate.model
-                config.knownPhysicalDevices[index].protocolName = candidate.protocolName
+            if let index = config.knownPhysicalDevices.firstIndex(where: { $0.deviceUUID == deviceUUID }) {
                 config.knownPhysicalDevices[index].size = candidate.size
                 config.knownPhysicalDevices[index].lastSeen = now
-                if let flashUUID {
-                    config.knownPhysicalDevices[index].lastKnownFlashUUID = flashUUID
-                }
             } else {
                 config.knownPhysicalDevices.append(
                     KnownPhysicalDevice(
-                        physicalDeviceID: candidate.physicalDeviceID,
+                        deviceUUID: deviceUUID,
                         customName: nil,
-                        lastSeenSystemName: candidate.displayName,
-                        vendor: candidate.vendor,
-                        model: candidate.model,
-                        protocolName: candidate.protocolName,
                         size: candidate.size,
                         firstSeen: now,
-                        lastSeen: now,
-                        lastKnownFlashUUID: flashUUID
+                        lastSeen: now
                     )
                 )
             }
@@ -147,7 +135,7 @@ public final class DeviceInventoryStore {
 
     public func setCustomName(id: String, name: String?) throws {
         try configStore.update { config in
-            guard let index = config.knownPhysicalDevices.firstIndex(where: { $0.physicalDeviceID == id }) else {
+            guard let index = config.knownPhysicalDevices.firstIndex(where: { $0.deviceUUID == id }) else {
                 return
             }
             config.knownPhysicalDevices[index].customName = name
@@ -169,6 +157,12 @@ public final class FlashHistoryStore {
     public func add(_ entry: FlashHistoryEntry) throws {
         try configStore.update { config in
             config.flashHistory.insert(entry, at: 0)
+        }
+    }
+
+    public func clear() throws {
+        try configStore.update { config in
+            config.flashHistory.removeAll()
         }
     }
 

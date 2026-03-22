@@ -46,43 +46,65 @@ public struct RememberedImage: Codable, Equatable, Sendable {
 }
 
 public struct KnownPhysicalDevice: Codable, Equatable, Sendable {
-    public var physicalDeviceID: String
+    public var deviceUUID: String
     public var customName: String?
-    public var lastSeenSystemName: String
-    public var vendor: String?
-    public var model: String?
-    public var protocolName: String?
     public var size: Int64
     public var firstSeen: Date
     public var lastSeen: Date
-    public var lastKnownFlashUUID: UUID?
+    public var userDefinedFields: [String: String]
 
     public init(
-        physicalDeviceID: String,
+        deviceUUID: String,
         customName: String? = nil,
-        lastSeenSystemName: String,
         vendor: String? = nil,
         model: String? = nil,
         protocolName: String? = nil,
         size: Int64,
         firstSeen: Date,
         lastSeen: Date,
-        lastKnownFlashUUID: UUID? = nil
+        userDefinedFields: [String: String] = [:]
     ) {
-        self.physicalDeviceID = physicalDeviceID
+        self.deviceUUID = deviceUUID
         self.customName = customName
-        self.lastSeenSystemName = lastSeenSystemName
-        self.vendor = vendor
-        self.model = model
-        self.protocolName = protocolName
         self.size = size
         self.firstSeen = firstSeen
         self.lastSeen = lastSeen
-        self.lastKnownFlashUUID = lastKnownFlashUUID
+        self.userDefinedFields = userDefinedFields
     }
 
     public var displayName: String {
-        customName ?? lastSeenSystemName
+        customName ?? deviceUUID
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case deviceUUID
+        case physicalDeviceID
+        case customName
+        case size
+        case firstSeen
+        case lastSeen
+        case userDefinedFields
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        deviceUUID = try container.decodeIfPresent(String.self, forKey: .deviceUUID)
+            ?? container.decode(String.self, forKey: .physicalDeviceID)
+        customName = try container.decodeIfPresent(String.self, forKey: .customName)
+        size = try container.decode(Int64.self, forKey: .size)
+        firstSeen = try container.decode(Date.self, forKey: .firstSeen)
+        lastSeen = try container.decode(Date.self, forKey: .lastSeen)
+        userDefinedFields = try container.decodeIfPresent([String: String].self, forKey: .userDefinedFields) ?? [:]
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(deviceUUID, forKey: .deviceUUID)
+        try container.encodeIfPresent(customName, forKey: .customName)
+        try container.encode(size, forKey: .size)
+        try container.encode(firstSeen, forKey: .firstSeen)
+        try container.encode(lastSeen, forKey: .lastSeen)
+        try container.encode(userDefinedFields, forKey: .userDefinedFields)
     }
 }
 
@@ -90,7 +112,7 @@ public struct KnownFlashMedia: Codable, Equatable, Sendable {
     public var flashUUID: UUID
     public var lastImagePath: String
     public var lastImageName: String
-    public var lastPhysicalDeviceID: String
+    public var deviceUUID: String
     public var flashedAt: Date
     public var lastSeen: Date
 
@@ -98,16 +120,47 @@ public struct KnownFlashMedia: Codable, Equatable, Sendable {
         flashUUID: UUID,
         lastImagePath: String,
         lastImageName: String,
-        lastPhysicalDeviceID: String,
+        deviceUUID: String,
         flashedAt: Date,
         lastSeen: Date
     ) {
         self.flashUUID = flashUUID
         self.lastImagePath = lastImagePath
         self.lastImageName = lastImageName
-        self.lastPhysicalDeviceID = lastPhysicalDeviceID
+        self.deviceUUID = deviceUUID
         self.flashedAt = flashedAt
         self.lastSeen = lastSeen
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case flashUUID
+        case lastImagePath
+        case lastImageName
+        case deviceUUID
+        case lastPhysicalDeviceID
+        case flashedAt
+        case lastSeen
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        flashUUID = try container.decode(UUID.self, forKey: .flashUUID)
+        lastImagePath = try container.decode(String.self, forKey: .lastImagePath)
+        lastImageName = try container.decode(String.self, forKey: .lastImageName)
+        deviceUUID = try container.decodeIfPresent(String.self, forKey: .deviceUUID)
+            ?? container.decode(String.self, forKey: .lastPhysicalDeviceID)
+        flashedAt = try container.decode(Date.self, forKey: .flashedAt)
+        lastSeen = try container.decode(Date.self, forKey: .lastSeen)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(flashUUID, forKey: .flashUUID)
+        try container.encode(lastImagePath, forKey: .lastImagePath)
+        try container.encode(lastImageName, forKey: .lastImageName)
+        try container.encode(deviceUUID, forKey: .deviceUUID)
+        try container.encode(flashedAt, forKey: .flashedAt)
+        try container.encode(lastSeen, forKey: .lastSeen)
     }
 }
 
@@ -116,7 +169,7 @@ public struct FlashHistoryEntry: Codable, Equatable, Sendable {
     public var finishedAt: Date
     public var imagePath: String
     public var imageName: String
-    public var physicalDeviceID: String
+    public var deviceUUID: String
     public var previousFlashUUID: UUID?
     public var newFlashUUID: UUID?
     public var uuidWriteSucceeded: Bool
@@ -127,7 +180,7 @@ public struct FlashHistoryEntry: Codable, Equatable, Sendable {
         finishedAt: Date,
         imagePath: String,
         imageName: String,
-        physicalDeviceID: String,
+        deviceUUID: String,
         previousFlashUUID: UUID?,
         newFlashUUID: UUID?,
         uuidWriteSucceeded: Bool,
@@ -137,19 +190,59 @@ public struct FlashHistoryEntry: Codable, Equatable, Sendable {
         self.finishedAt = finishedAt
         self.imagePath = imagePath
         self.imageName = imageName
-        self.physicalDeviceID = physicalDeviceID
+        self.deviceUUID = deviceUUID
         self.previousFlashUUID = previousFlashUUID
         self.newFlashUUID = newFlashUUID
         self.uuidWriteSucceeded = uuidWriteSucceeded
         self.result = result
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case startedAt
+        case finishedAt
+        case imagePath
+        case imageName
+        case deviceUUID
+        case physicalDeviceID
+        case previousFlashUUID
+        case newFlashUUID
+        case uuidWriteSucceeded
+        case result
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        startedAt = try container.decode(Date.self, forKey: .startedAt)
+        finishedAt = try container.decode(Date.self, forKey: .finishedAt)
+        imagePath = try container.decode(String.self, forKey: .imagePath)
+        imageName = try container.decode(String.self, forKey: .imageName)
+        deviceUUID = try container.decodeIfPresent(String.self, forKey: .deviceUUID)
+            ?? container.decode(String.self, forKey: .physicalDeviceID)
+        previousFlashUUID = try container.decodeIfPresent(UUID.self, forKey: .previousFlashUUID)
+        newFlashUUID = try container.decodeIfPresent(UUID.self, forKey: .newFlashUUID)
+        uuidWriteSucceeded = try container.decode(Bool.self, forKey: .uuidWriteSucceeded)
+        result = try container.decode(String.self, forKey: .result)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(startedAt, forKey: .startedAt)
+        try container.encode(finishedAt, forKey: .finishedAt)
+        try container.encode(imagePath, forKey: .imagePath)
+        try container.encode(imageName, forKey: .imageName)
+        try container.encode(deviceUUID, forKey: .deviceUUID)
+        try container.encodeIfPresent(previousFlashUUID, forKey: .previousFlashUUID)
+        try container.encodeIfPresent(newFlashUUID, forKey: .newFlashUUID)
+        try container.encode(uuidWriteSucceeded, forKey: .uuidWriteSucceeded)
+        try container.encode(result, forKey: .result)
+    }
 }
 
 public struct FlashUUIDMetadata: Codable, Equatable, Sendable {
     public var schemaVersion: Int
-    public var flashUUID: UUID
-    public var physicalDeviceID: String
-    public var physicalDeviceName: String?
+    public var flashUUID: UUID?
+    public var deviceUUID: String
+    public var deviceName: String?
     public var imagePath: String
     public var imageName: String
     public var imageSHA256: String?
@@ -157,9 +250,9 @@ public struct FlashUUIDMetadata: Codable, Equatable, Sendable {
 
     public init(
         schemaVersion: Int = 1,
-        flashUUID: UUID,
-        physicalDeviceID: String,
-        physicalDeviceName: String?,
+        flashUUID: UUID?,
+        deviceUUID: String,
+        deviceName: String?,
         imagePath: String,
         imageName: String,
         imageSHA256: String?,
@@ -167,12 +260,97 @@ public struct FlashUUIDMetadata: Codable, Equatable, Sendable {
     ) {
         self.schemaVersion = schemaVersion
         self.flashUUID = flashUUID
-        self.physicalDeviceID = physicalDeviceID
-        self.physicalDeviceName = physicalDeviceName
+        self.deviceUUID = deviceUUID
+        self.deviceName = deviceName
         self.imagePath = imagePath
         self.imageName = imageName
         self.imageSHA256 = imageSHA256
         self.flashedAt = flashedAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case flashUUID
+        case deviceUUID
+        case physicalDeviceID
+        case deviceName
+        case physicalDeviceName
+        case imagePath
+        case imageName
+        case imageSHA256
+        case flashedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        flashUUID = try container.decodeIfPresent(UUID.self, forKey: .flashUUID)
+        deviceUUID = try container.decodeIfPresent(String.self, forKey: .deviceUUID)
+            ?? container.decode(String.self, forKey: .physicalDeviceID)
+        deviceName = try container.decodeIfPresent(String.self, forKey: .deviceName)
+            ?? container.decodeIfPresent(String.self, forKey: .physicalDeviceName)
+        imagePath = try container.decode(String.self, forKey: .imagePath)
+        imageName = try container.decode(String.self, forKey: .imageName)
+        imageSHA256 = try container.decodeIfPresent(String.self, forKey: .imageSHA256)
+        flashedAt = try container.decode(Date.self, forKey: .flashedAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encodeIfPresent(flashUUID, forKey: .flashUUID)
+        try container.encode(deviceUUID, forKey: .deviceUUID)
+        try container.encodeIfPresent(deviceName, forKey: .deviceName)
+        try container.encode(imagePath, forKey: .imagePath)
+        try container.encode(imageName, forKey: .imageName)
+        try container.encodeIfPresent(imageSHA256, forKey: .imageSHA256)
+        try container.encode(flashedAt, forKey: .flashedAt)
+    }
+}
+
+public enum DeviceIdentitySource: String, Equatable, Sendable {
+    case file
+    case trailer
+    case created
+
+    public var displayLabel: String {
+        switch self {
+        case .file:
+            return "reused(.uuid)"
+        case .trailer:
+            return "reused(trailer)"
+        case .created:
+            return "created(.uuid)"
+        }
+    }
+}
+
+public struct ResolvedDeviceIdentity: Equatable, Sendable {
+    public var metadata: FlashUUIDMetadata
+    public var source: DeviceIdentitySource
+
+    public init(metadata: FlashUUIDMetadata, source: DeviceIdentitySource) {
+        self.metadata = metadata
+        self.source = source
+    }
+}
+
+public struct FlashCompletion: Equatable, Sendable {
+    public var previousIdentity: ResolvedDeviceIdentity?
+    public var metadata: FlashUUIDMetadata
+    public var writeResult: MetadataWriteResult
+    public var verified: Bool
+
+    public init(
+        previousIdentity: ResolvedDeviceIdentity?,
+        metadata: FlashUUIDMetadata,
+        writeResult: MetadataWriteResult,
+        verified: Bool
+    ) {
+        self.previousIdentity = previousIdentity
+        self.metadata = metadata
+        self.writeResult = writeResult
+        self.verified = verified
     }
 }
 
@@ -362,11 +540,14 @@ public enum PartitionScheme: String, Equatable, Sendable {
 
 public enum FlashCommand: Equatable, Sendable {
     case flash(imagePath: String?, devicePath: String?, skipConfirmation: Bool)
+    case verify(imagePath: String?, devicePath: String?)
     case images
-    case devices
+    case devicesConnected
+    case devicesKnown
     case deviceName(id: String, name: String)
     case deviceClearName(id: String)
     case history
+    case historyClear
     case help
 }
 
@@ -382,6 +563,7 @@ public enum FlashError: LocalizedError, Equatable {
     case unmountFailed(String)
     case mountFailed(String)
     case rawWriteFailed(String)
+    case verificationFailed(String)
     case persistenceFailed(String)
     case ioFailed(String)
 
@@ -409,6 +591,8 @@ public enum FlashError: LocalizedError, Equatable {
             "Failed to mount volume: \(reason)"
         case .rawWriteFailed(let reason):
             "Flash write failed: \(reason)"
+        case .verificationFailed(let reason):
+            "Verification failed: \(reason)"
         case .persistenceFailed(let reason):
             "Failed to persist config: \(reason)"
         case .ioFailed(let reason):
@@ -435,5 +619,32 @@ enum JSONCoding {
 enum Hashing {
     static func sha256Hex(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+public struct MetadataWriteResult: Equatable, Sendable {
+    public var fileWritten: Bool
+    public var trailerWritten: Bool
+
+    public init(fileWritten: Bool, trailerWritten: Bool) {
+        self.fileWritten = fileWritten
+        self.trailerWritten = trailerWritten
+    }
+
+    public var anyWritten: Bool {
+        fileWritten || trailerWritten
+    }
+
+    public var storageDescription: String {
+        switch (fileWritten, trailerWritten) {
+        case (true, true):
+            return ".uuid file + trailer"
+        case (true, false):
+            return ".uuid file"
+        case (false, true):
+            return "trailer"
+        case (false, false):
+            return "none"
+        }
     }
 }

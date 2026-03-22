@@ -10,6 +10,30 @@ struct SwiftFlashCoreTests {
     }
 
     @Test
+    func parserDefaultsDevicesToConnectedView() throws {
+        let command = try CLIParser.parse(arguments: ["swiftflash", "devices"])
+        #expect(command == .devicesConnected)
+    }
+
+    @Test
+    func parserSupportsKnownDevicesView() throws {
+        let command = try CLIParser.parse(arguments: ["swiftflash", "devices", "known"])
+        #expect(command == .devicesKnown)
+    }
+
+    @Test
+    func parserSupportsVerifyCommand() throws {
+        let command = try CLIParser.parse(arguments: ["swiftflash", "verify", "image.iso", "/dev/disk4"])
+        #expect(command == .verify(imagePath: "image.iso", devicePath: "/dev/disk4"))
+    }
+
+    @Test
+    func parserSupportsHistoryClearCommand() throws {
+        let command = try CLIParser.parse(arguments: ["swiftflash", "history", "clear"])
+        #expect(command == .historyClear)
+    }
+
+    @Test
     func pathResolverUsesSudoUserHome() throws {
         let url = try ConfigPathResolver.defaultConfigURL(
             env: ["HOME": "/var/root", "SUDO_USER": NSUserName()],
