@@ -25,6 +25,9 @@ The current version provides:
 
 The code compiles and the automated tests pass. Real hardware flashing should still be treated as the next validation step.
 
+Release overview and planned follow-up work:
+- [RELEASE.md](RELEASE.md)
+
 ## Requirements
 
 - macOS 13 or later
