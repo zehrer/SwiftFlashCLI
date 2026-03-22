@@ -4,7 +4,7 @@ This file tracks which requirements are already included in a release and which 
 
 ## Release 0.1.0
 
-Status: implemented
+status: implemented
 
 Included requirements:
 - pure Swift CLI implementation
@@ -31,23 +31,18 @@ Known gaps:
 - no full config cleanup/reset command yet
 - no editing of custom user-defined device fields from the CLI yet
 
-## Release 0.2.0
-
-Status: planned
-
+## Later Releases 
 Planned requirements:
+- `swiftflash version`
+
+
+Potenial requirements:
 - `swiftflash version`
 - `swiftflash reset` or targeted cleanup commands for images, devices, and config
 - CLI commands to edit user-defined device fields
 - improved device listing and formatting for multiple similar readers/cards
 - clearer distinction between device metadata and flashed image metadata in history output
 - stronger validation on unusual partition layouts and edge cases
-
-## Release 0.3.0
-
-Status: planned
-
-Planned requirements:
 - stable shared core API prepared for direct GUI reuse
 - import/export or migration support for shared GUI/CLI config handling
 - extended verification modes
