@@ -2,21 +2,71 @@ import CryptoKit
 import Foundation
 
 public struct AppConfig: Codable, Equatable, Sendable {
+    public var mediaTypes: [MediaTypeDefinition]
     public var rememberedImages: [RememberedImage]
     public var knownPhysicalDevices: [KnownPhysicalDevice]
     public var knownFlashMedia: [KnownFlashMedia]
     public var flashHistory: [FlashHistoryEntry]
 
     public init(
+        mediaTypes: [MediaTypeDefinition] = MediaTypeDefinition.preconfiguredDefaults(),
         rememberedImages: [RememberedImage] = [],
         knownPhysicalDevices: [KnownPhysicalDevice] = [],
         knownFlashMedia: [KnownFlashMedia] = [],
         flashHistory: [FlashHistoryEntry] = []
     ) {
+        self.mediaTypes = mediaTypes
         self.rememberedImages = rememberedImages
         self.knownPhysicalDevices = knownPhysicalDevices
         self.knownFlashMedia = knownFlashMedia
         self.flashHistory = flashHistory
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case mediaTypes
+        case rememberedImages
+        case knownPhysicalDevices
+        case knownFlashMedia
+        case flashHistory
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        mediaTypes = try container.decodeIfPresent([MediaTypeDefinition].self, forKey: .mediaTypes)
+            ?? MediaTypeDefinition.preconfiguredDefaults()
+        rememberedImages = try container.decodeIfPresent([RememberedImage].self, forKey: .rememberedImages) ?? []
+        knownPhysicalDevices = try container.decodeIfPresent([KnownPhysicalDevice].self, forKey: .knownPhysicalDevices) ?? []
+        knownFlashMedia = try container.decodeIfPresent([KnownFlashMedia].self, forKey: .knownFlashMedia) ?? []
+        flashHistory = try container.decodeIfPresent([FlashHistoryEntry].self, forKey: .flashHistory) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(mediaTypes, forKey: .mediaTypes)
+        try container.encode(rememberedImages, forKey: .rememberedImages)
+        try container.encode(knownPhysicalDevices, forKey: .knownPhysicalDevices)
+        try container.encode(knownFlashMedia, forKey: .knownFlashMedia)
+        try container.encode(flashHistory, forKey: .flashHistory)
+    }
+}
+
+public struct MediaTypeDefinition: Codable, Equatable, Sendable {
+    public var name: String
+    public var isPreconfigured: Bool
+    public var createdAt: Date
+
+    public init(name: String, isPreconfigured: Bool, createdAt: Date) {
+        self.name = name
+        self.isPreconfigured = isPreconfigured
+        self.createdAt = createdAt
+    }
+
+    public static func preconfiguredDefaults(createdAt: Date = Date()) -> [MediaTypeDefinition] {
+        [
+            MediaTypeDefinition(name: "USB Stick", isPreconfigured: true, createdAt: createdAt),
+            MediaTypeDefinition(name: "SD Card", isPreconfigured: true, createdAt: createdAt),
+            MediaTypeDefinition(name: "Micro SD Card", isPreconfigured: true, createdAt: createdAt)
+        ]
     }
 }
 
@@ -48,6 +98,7 @@ public struct RememberedImage: Codable, Equatable, Sendable {
 public struct KnownPhysicalDevice: Codable, Equatable, Sendable {
     public var deviceUUID: String
     public var customName: String?
+    public var mediaTypeName: String?
     public var size: Int64
     public var firstSeen: Date
     public var lastSeen: Date
@@ -56,6 +107,7 @@ public struct KnownPhysicalDevice: Codable, Equatable, Sendable {
     public init(
         deviceUUID: String,
         customName: String? = nil,
+        mediaTypeName: String? = nil,
         vendor: String? = nil,
         model: String? = nil,
         protocolName: String? = nil,
@@ -66,6 +118,7 @@ public struct KnownPhysicalDevice: Codable, Equatable, Sendable {
     ) {
         self.deviceUUID = deviceUUID
         self.customName = customName
+        self.mediaTypeName = mediaTypeName
         self.size = size
         self.firstSeen = firstSeen
         self.lastSeen = lastSeen
@@ -80,6 +133,7 @@ public struct KnownPhysicalDevice: Codable, Equatable, Sendable {
         case deviceUUID
         case physicalDeviceID
         case customName
+        case mediaTypeName
         case size
         case firstSeen
         case lastSeen
@@ -91,6 +145,7 @@ public struct KnownPhysicalDevice: Codable, Equatable, Sendable {
         deviceUUID = try container.decodeIfPresent(String.self, forKey: .deviceUUID)
             ?? container.decode(String.self, forKey: .physicalDeviceID)
         customName = try container.decodeIfPresent(String.self, forKey: .customName)
+        mediaTypeName = try container.decodeIfPresent(String.self, forKey: .mediaTypeName)
         size = try container.decode(Int64.self, forKey: .size)
         firstSeen = try container.decode(Date.self, forKey: .firstSeen)
         lastSeen = try container.decode(Date.self, forKey: .lastSeen)
@@ -101,6 +156,7 @@ public struct KnownPhysicalDevice: Codable, Equatable, Sendable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(deviceUUID, forKey: .deviceUUID)
         try container.encodeIfPresent(customName, forKey: .customName)
+        try container.encodeIfPresent(mediaTypeName, forKey: .mediaTypeName)
         try container.encode(size, forKey: .size)
         try container.encode(firstSeen, forKey: .firstSeen)
         try container.encode(lastSeen, forKey: .lastSeen)
@@ -539,16 +595,29 @@ public enum PartitionScheme: String, Equatable, Sendable {
 }
 
 public enum FlashCommand: Equatable, Sendable {
+    case repl
     case flash(imagePath: String?, devicePath: String?, skipConfirmation: Bool)
     case verify(imagePath: String?, devicePath: String?)
     case images
-    case devicesConnected
-    case devicesKnown
-    case deviceName(id: String, name: String)
-    case deviceClearName(id: String)
+    case mediaList
+    case mediaKnown
+    case mediaInfo(query: String)
+    case mediaIdentify
+    case mediaTypes
+    case mediaTypeAdd(name: String)
+    case mediaSetType(id: String, typeName: String)
+    case mediaClearType(id: String)
+    case mediaName(id: String, name: String)
+    case mediaClearName(id: String)
     case history
     case historyClear
     case help
+}
+
+public enum InteractiveInput: Equatable, Sendable {
+    case empty
+    case exit
+    case command(FlashCommand)
 }
 
 public enum FlashError: LocalizedError, Equatable {

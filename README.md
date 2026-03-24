@@ -17,6 +17,7 @@ The current version provides:
 - interactive or argument-based flashing
 - remembered image history
 - remembered device UUID inventory
+- configurable media types with preconfigured defaults
 - flash history persistence
 - best-effort `.uuid` metadata read/write on flashed media
 - optional post-flash verification
@@ -52,6 +53,12 @@ Run the CLI:
 ./.build/debug/swiftflash help
 ```
 
+Run without arguments to start the interactive shell:
+
+```bash
+./.build/debug/swiftflash
+```
+
 ## Usage
 
 Main command:
@@ -59,6 +66,15 @@ Main command:
 ```bash
 sudo swiftflash [image_file] [/dev/diskX]
 ```
+
+Interactive shell:
+
+```bash
+swiftflash
+```
+
+Inside the shell, type commands like `flash`, `media list`, or `history`.
+Leave the shell with `exit`, `quit`, or `quite`.
 
 Explicit subcommand form:
 
@@ -70,10 +86,17 @@ Additional commands:
 
 ```bash
 swiftflash images
-swiftflash devices
-swiftflash devices known
-swiftflash devices name <device-uuid> <name>
-swiftflash devices clear-name <device-uuid>
+swiftflash media list
+swiftflash media known
+swiftflash media info <name-or-device-uuid>
+swiftflash media identify
+swiftflash identify
+swiftflash media types
+swiftflash media type-add <type-name>
+swiftflash media set-type <device-uuid> <type-name>
+swiftflash media clear-type <device-uuid>
+swiftflash media name <device-uuid> <name>
+swiftflash media clear-name <device-uuid>
 swiftflash history
 swiftflash history clear
 sudo swiftflash verify /path/to/image.iso /dev/diskX
@@ -84,7 +107,8 @@ sudo swiftflash verify /path/to/image.iso /dev/diskX
 - If no image is provided, the tool shows remembered images and allows entering a new path.
 - If no device is provided, the tool scans for external physical whole disks and offers an interactive selection.
 - If exactly one eligible device is found, that device is proposed directly.
-- If a new writable device has no UUID metadata yet, the tool can create a `deviceUUID` marker immediately so later scans can reuse it.
+- If no command is provided, the tool starts an interactive REPL-style shell.
+- `swiftflash media identify` can create a `device-uuid` marker on a writable new medium so later scans can reuse it.
 - Unless `--yes` is used, the flash flow asks for final destructive confirmation.
 
 ## Persistence
@@ -98,12 +122,18 @@ The CLI stores its shared config at:
 When run under `sudo`, the tool resolves this path against the invoking user so config is still written to the user account rather than root.
 
 The persisted schema contains:
+- `mediaTypes`
 - `rememberedImages`
 - `knownPhysicalDevices`
 - `knownFlashMedia`
 - `flashHistory`
 
 `knownPhysicalDevices` is intentionally minimal and keeps only tool-managed device UUIDs plus user-meaningful metadata. It does not persist reader-derived vendor/model labels.
+
+`mediaTypes` are regular config data, not a hard-coded enum. A fresh config starts with:
+- `USB Stick`
+- `SD Card`
+- `Micro SD Card`
 
 This layout is intended to stay compatible with future integration into the SwiftFlash GUI project.
 

@@ -113,6 +113,49 @@ public final class DeviceInventoryStore {
         configStore.currentConfig().knownPhysicalDevices.sorted { $0.lastSeen > $1.lastSeen }
     }
 
+    public func allMediaTypes() -> [MediaTypeDefinition] {
+        configStore.currentConfig().mediaTypes.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    public func findMediaType(named query: String) -> MediaTypeDefinition? {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedQuery.isEmpty else {
+            return nil
+        }
+        return allMediaTypes().first { $0.name.lowercased() == normalizedQuery }
+    }
+
+    public func findDevice(matching query: String) -> KnownPhysicalDevice? {
+        let normalizedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !normalizedQuery.isEmpty else {
+            return nil
+        }
+
+        return allDevices().first { device in
+            device.deviceUUID.lowercased() == normalizedQuery
+                || device.customName?.lowercased() == normalizedQuery
+                || device.displayName.lowercased() == normalizedQuery
+        }
+    }
+
+    public func addMediaType(name: String) throws {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw FlashError.usage("Media type name must not be empty")
+        }
+
+        try configStore.update { config in
+            let exists = config.mediaTypes.contains { $0.name.caseInsensitiveCompare(trimmed) == .orderedSame }
+            guard !exists else {
+                return
+            }
+            config.mediaTypes.append(
+                MediaTypeDefinition(name: trimmed, isPreconfigured: false, createdAt: Date())
+            )
+            config.mediaTypes.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }
+    }
+
     public func upsert(deviceUUID: String, candidate: DiskCandidate) throws {
         try configStore.update { config in
             let now = Date()
@@ -139,6 +182,22 @@ public final class DeviceInventoryStore {
                 return
             }
             config.knownPhysicalDevices[index].customName = name
+        }
+    }
+
+    public func setMediaType(id: String, mediaTypeName: String?) throws {
+        let normalizedMediaType = mediaTypeName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let normalizedMediaType, !normalizedMediaType.isEmpty {
+            guard findMediaType(named: normalizedMediaType) != nil else {
+                throw FlashError.usage("Unknown media type: \(normalizedMediaType)")
+            }
+        }
+
+        try configStore.update { config in
+            guard let index = config.knownPhysicalDevices.firstIndex(where: { $0.deviceUUID == id }) else {
+                return
+            }
+            config.knownPhysicalDevices[index].mediaTypeName = normalizedMediaType?.isEmpty == true ? nil : normalizedMediaType
         }
     }
 }

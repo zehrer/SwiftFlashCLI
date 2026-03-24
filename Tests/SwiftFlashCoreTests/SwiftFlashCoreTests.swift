@@ -10,15 +10,70 @@ struct SwiftFlashCoreTests {
     }
 
     @Test
-    func parserDefaultsDevicesToConnectedView() throws {
-        let command = try CLIParser.parse(arguments: ["swiftflash", "devices"])
-        #expect(command == .devicesConnected)
+    func parserStartsREPLWithoutArguments() throws {
+        let command = try CLIParser.parse(arguments: ["swiftflash"])
+        #expect(command == .repl)
     }
 
     @Test
-    func parserSupportsKnownDevicesView() throws {
-        let command = try CLIParser.parse(arguments: ["swiftflash", "devices", "known"])
-        #expect(command == .devicesKnown)
+    func parserDefaultsMediaToListView() throws {
+        let command = try CLIParser.parse(arguments: ["swiftflash", "media"])
+        #expect(command == .mediaList)
+    }
+
+    @Test
+    func parserSupportsLegacyDevicesAlias() throws {
+        let command = try CLIParser.parse(arguments: ["swiftflash", "devices"])
+        #expect(command == .mediaList)
+    }
+
+    @Test
+    func parserSupportsKnownMediaView() throws {
+        let command = try CLIParser.parse(arguments: ["swiftflash", "media", "known"])
+        #expect(command == .mediaKnown)
+    }
+
+    @Test
+    func parserSupportsMediaInfoCommand() throws {
+        let command = try CLIParser.parse(arguments: ["swiftflash", "media", "info", "my-usb"])
+        #expect(command == .mediaInfo(query: "my-usb"))
+    }
+
+    @Test
+    func parserSupportsIdentifyCommand() throws {
+        let command = try CLIParser.parse(arguments: ["swiftflash", "identify"])
+        #expect(command == .mediaIdentify)
+    }
+
+    @Test
+    func interactiveParserSupportsExitCommands() throws {
+        #expect(try CLIParser.parseInteractive(line: "exit") == .exit)
+        #expect(try CLIParser.parseInteractive(line: "quit") == .exit)
+        #expect(try CLIParser.parseInteractive(line: "quite") == .exit)
+    }
+
+    @Test
+    func interactiveParserSupportsQuotedArguments() throws {
+        let command = try CLIParser.parseInteractive(line: "media type-add \"Installer Stick\"")
+        #expect(command == .command(.mediaTypeAdd(name: "Installer Stick")))
+    }
+
+    @Test
+    func parserSupportsMediaTypesCommand() throws {
+        let command = try CLIParser.parse(arguments: ["swiftflash", "media", "types"])
+        #expect(command == .mediaTypes)
+    }
+
+    @Test
+    func parserSupportsMediaTypeAddCommand() throws {
+        let command = try CLIParser.parse(arguments: ["swiftflash", "media", "type-add", "Installer Stick"])
+        #expect(command == .mediaTypeAdd(name: "Installer Stick"))
+    }
+
+    @Test
+    func parserSupportsMediaSetTypeCommand() throws {
+        let command = try CLIParser.parse(arguments: ["swiftflash", "media", "set-type", "abc-123", "USB Stick"])
+        #expect(command == .mediaSetType(id: "abc-123", typeName: "USB Stick"))
     }
 
     @Test
@@ -97,5 +152,48 @@ struct SwiftFlashCoreTests {
         try images.remember(image: ImageDescriptor(url: URL(fileURLWithPath: "/tmp/b.iso"), size: 10, checksum: nil))
 
         #expect(images.allImages().map(\.path) == ["/tmp/b.iso", "/tmp/a.iso"])
+    }
+
+    @Test
+    func configStartsWithPreconfiguredMediaTypes() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = try AppConfigStore(configURL: tmp)
+        let inventory = DeviceInventoryStore(configStore: store)
+
+        #expect(inventory.allMediaTypes().map(\.name) == ["Micro SD Card", "SD Card", "USB Stick"])
+    }
+
+    @Test
+    func deviceStoreCanAssignMediaType() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = try AppConfigStore(configURL: tmp)
+        let inventory = DeviceInventoryStore(configStore: store)
+
+        try inventory.upsert(
+            deviceUUID: "device-1",
+            candidate: DiskCandidate(
+                devicePath: "/dev/disk9",
+                rawDevicePath: "/dev/rdisk9",
+                bsdName: "disk9",
+                physicalDeviceID: "scan-hint",
+                name: "USB Reader",
+                vendor: nil,
+                model: nil,
+                protocolName: nil,
+                serialNumber: nil,
+                size: 1024,
+                isInternal: false,
+                isRemovable: true,
+                isEjectable: true,
+                isWritable: true,
+                isWhole: true,
+                mediaUUID: nil,
+                mediaKind: nil,
+                partitions: []
+            )
+        )
+
+        try inventory.setMediaType(id: "device-1", mediaTypeName: "USB Stick")
+        #expect(inventory.findDevice(matching: "device-1")?.mediaTypeName == "USB Stick")
     }
 }

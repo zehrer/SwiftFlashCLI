@@ -4,48 +4,53 @@ import SwiftFlashCore
 @main
 struct SwiftFlashCLI {
     static func main() async {
+        let services: Services
+        do {
+            let configStore = try AppConfigStore()
+            services = Services(
+                imageStore: ImageCatalogStore(configStore: configStore),
+                deviceStore: DeviceInventoryStore(configStore: configStore),
+                historyStore: FlashHistoryStore(configStore: configStore),
+                scanner: DeviceScanner(),
+                deviceManager: DiskArbitrationManager(),
+                prompt: PromptRenderer(),
+                uuidService: UUIDMetadataService()
+            )
+        } catch {
+            fputs("\(error.localizedDescription)\n", stderr)
+            exit(1)
+        }
+
         do {
             let command = try CLIParser.parse(arguments: CommandLine.arguments)
-            if case .help = command {
-                print(HelpRenderer.text)
-                return
-            }
+            try await execute(command: command, services: services)
+        } catch {
+            fputs("\(error.localizedDescription)\n", stderr)
+            exit(1)
+        }
+    }
 
-            let configStore = try AppConfigStore()
-            let imageStore = ImageCatalogStore(configStore: configStore)
-            let deviceStore = DeviceInventoryStore(configStore: configStore)
-            let historyStore = FlashHistoryStore(configStore: configStore)
-            let scanner = DeviceScanner()
-            let deviceManager = DiskArbitrationManager()
-            let prompt = PromptRenderer()
-            let uuidService = UUIDMetadataService()
-            let flashService = FlashService(
-                scanner: scanner,
-                deviceManager: deviceManager,
-                writer: FlashWriter(),
-                verifier: FlashVerifier(),
-                uuidService: uuidService,
-                imageStore: imageStore,
-                deviceStore: deviceStore,
-                historyStore: historyStore
-            )
+    private static func execute(command: FlashCommand, services: Services) async throws {
+        switch command {
+            case .repl:
+                try await runREPL(services: services)
 
-            switch command {
             case .flash(let imagePath, let devicePath, let skipConfirmation):
                 guard geteuid() == 0 else {
                     throw FlashError.requiresRoot
                 }
 
-                let image = try resolveImage(path: imagePath, imageStore: imageStore, prompt: prompt)
-                let device = try resolveDevice(path: devicePath, scanner: scanner, prompt: prompt)
-                if !skipConfirmation && !prompt.confirmFlash(image: image, device: device) {
+                let image = try resolveImage(path: imagePath, imageStore: services.imageStore, prompt: services.prompt)
+                let device = try resolveDevice(path: devicePath, scanner: services.scanner, prompt: services.prompt)
+                if !skipConfirmation && !services.prompt.confirmFlash(image: image, device: device) {
                     throw FlashError.cancelled
                 }
 
                 print("Flashing \(image.name) to \(device.displayName) (\(device.devicePath))")
                 let writeProgress = ConsoleProgressRenderer(label: "Flash", totalBytes: image.size)
                 let verifyProgress = ConsoleProgressRenderer(label: "Verify", totalBytes: image.size)
-                let completion = try await flashService.flash(
+                let prompt = services.prompt
+                let completion = try await services.flashService.flash(
                     image: image,
                     device: device,
                     writeProgress: { progress in
@@ -74,11 +79,11 @@ struct SwiftFlashCLI {
                     throw FlashError.requiresRoot
                 }
 
-                let image = try resolveImage(path: imagePath, imageStore: imageStore, prompt: prompt)
-                let device = try resolveDevice(path: devicePath, scanner: scanner, prompt: prompt)
+                let image = try resolveImage(path: imagePath, imageStore: services.imageStore, prompt: services.prompt)
+                let device = try resolveDevice(path: devicePath, scanner: services.scanner, prompt: services.prompt)
                 let verifyProgress = ConsoleProgressRenderer(label: "Verify", totalBytes: image.size)
                 print("Verifying \(image.name) against \(device.displayName) (\(device.devicePath))")
-                try await flashService.verify(
+                try await services.flashService.verify(
                     image: image,
                     device: device,
                     progress: { progress in
@@ -89,7 +94,7 @@ struct SwiftFlashCLI {
                 print("Verification successful")
 
             case .images:
-                let images = imageStore.allImages()
+                let images = services.imageStore.allImages()
                 if images.isEmpty {
                     print("No remembered images")
                 } else {
@@ -98,51 +103,74 @@ struct SwiftFlashCLI {
                     }
                 }
 
-            case .devicesConnected:
-                let scanned = try scanner.scanEligibleDevices()
-                if scanned.isEmpty {
-                    print("No connected eligible flash devices")
+            case .mediaList:
+                try listConnectedMedia(
+                    scanner: services.scanner,
+                    uuidService: services.uuidService,
+                    deviceStore: services.deviceStore,
+                    identifyNewMedia: false
+                )
+
+            case .mediaKnown:
+                let media = services.deviceStore.allDevices()
+                if media.isEmpty {
+                    print("No remembered media")
                 } else {
-                    let knownByID = Dictionary(
-                        uniqueKeysWithValues: deviceStore.allDevices().map { ($0.deviceUUID, $0) }
-                    )
-                    for device in scanned {
-                        let identity = uuidService.ensureDeviceIdentity(for: device)
-                        let metadata = identity?.metadata
-                        let known = metadata.flatMap { knownByID[$0.deviceUUID] }
-                        let displayName = known?.displayName ?? device.displayName
-                        let deviceIdentifier = metadata?.deviceUUID ?? "unassigned"
-                        let rememberedSuffix = known == nil ? "" : " [remembered]"
-                        let source = identity?.source.displayLabel ?? "unassigned"
-                        if let metadata {
-                            try? deviceStore.upsert(deviceUUID: metadata.deviceUUID, candidate: device)
-                        }
-                        print(
-                            "\(displayName)\t\(device.devicePath)\t\(device.formattedSize)\t\(deviceIdentifier)\tdevice-uuid:\(source)\(rememberedSuffix)"
-                        )
+                    for medium in media {
+                        let mediaType = medium.mediaTypeName ?? "-"
+                        print("\(medium.displayName)\t\(medium.deviceUUID)\t\(mediaType)")
                     }
                 }
 
-            case .devicesKnown:
-                let devices = deviceStore.allDevices()
-                if devices.isEmpty {
-                    print("No remembered devices")
+            case .mediaInfo(let query):
+                try showMediaInfo(
+                    query: query,
+                    scanner: services.scanner,
+                    uuidService: services.uuidService,
+                    deviceStore: services.deviceStore
+                )
+
+            case .mediaIdentify:
+                try listConnectedMedia(
+                    scanner: services.scanner,
+                    uuidService: services.uuidService,
+                    deviceStore: services.deviceStore,
+                    identifyNewMedia: true
+                )
+
+            case .mediaTypes:
+                let mediaTypes = services.deviceStore.allMediaTypes()
+                if mediaTypes.isEmpty {
+                    print("No configured media types")
                 } else {
-                    for device in devices {
-                        print("\(device.displayName)\t\(device.deviceUUID)")
+                    for mediaType in mediaTypes {
+                        let source = mediaType.isPreconfigured ? "preconfigured" : "custom"
+                        print("\(mediaType.name)\t\(source)")
                     }
                 }
 
-            case .deviceName(let id, let name):
-                try deviceStore.setCustomName(id: id, name: name)
-                print("Updated device name")
+            case .mediaTypeAdd(let name):
+                try services.deviceStore.addMediaType(name: name)
+                print("Added media type")
 
-            case .deviceClearName(let id):
-                try deviceStore.setCustomName(id: id, name: nil)
-                print("Cleared device name")
+            case .mediaSetType(let id, let typeName):
+                try services.deviceStore.setMediaType(id: id, mediaTypeName: typeName)
+                print("Updated media type")
+
+            case .mediaClearType(let id):
+                try services.deviceStore.setMediaType(id: id, mediaTypeName: nil)
+                print("Cleared media type")
+
+            case .mediaName(let id, let name):
+                try services.deviceStore.setCustomName(id: id, name: name)
+                print("Updated media name")
+
+            case .mediaClearName(let id):
+                try services.deviceStore.setCustomName(id: id, name: nil)
+                print("Cleared media name")
 
             case .history:
-                let history = historyStore.allHistory()
+                let history = services.historyStore.allHistory()
                 if history.isEmpty {
                     print("No flash history")
                 } else {
@@ -152,15 +180,39 @@ struct SwiftFlashCLI {
                 }
 
             case .historyClear:
-                try historyStore.clear()
+                try services.historyStore.clear()
                 print("Cleared flash history")
 
             case .help:
                 print(HelpRenderer.text)
+        }
+    }
+
+    private static func runREPL(services: Services) async throws {
+        print("SwiftFlashCLI interactive shell")
+        print("Type `help` for commands. Type `exit`, `quit`, or `quite` to leave.")
+
+        while true {
+            print("swiftflash> ", terminator: "")
+            fflush(stdout)
+
+            guard let line = readLine(strippingNewline: true) else {
+                print("")
+                break
             }
-        } catch {
-            fputs("\(error.localizedDescription)\n", stderr)
-            exit(1)
+
+            do {
+                switch try CLIParser.parseInteractive(line: line) {
+                case .empty:
+                    continue
+                case .exit:
+                    return
+                case .command(let command):
+                    try await execute(command: command, services: services)
+                }
+            } catch {
+                fputs("\(error.localizedDescription)\n", stderr)
+            }
         }
     }
 
@@ -186,5 +238,105 @@ struct SwiftFlashCLI {
         }
         let devices = try scanner.scanEligibleDevices()
         return try prompt.selectDevice(from: devices)
+    }
+
+    private static func listConnectedMedia(
+        scanner: DeviceScanner,
+        uuidService: UUIDMetadataService,
+        deviceStore: DeviceInventoryStore,
+        identifyNewMedia: Bool
+    ) throws {
+        let scanned = try scanner.scanEligibleDevices()
+        if scanned.isEmpty {
+            print("No connected eligible flash media")
+            return
+        }
+
+        let knownByID = Dictionary(uniqueKeysWithValues: deviceStore.allDevices().map { ($0.deviceUUID, $0) })
+        for device in scanned {
+            let identity = identifyNewMedia
+                ? uuidService.ensureDeviceIdentity(for: device)
+                : uuidService.resolveIdentity(for: device)
+            let metadata = identity?.metadata
+            let known = metadata.flatMap { knownByID[$0.deviceUUID] }
+            let displayName = known?.displayName ?? device.displayName
+            let deviceIdentifier = metadata?.deviceUUID ?? "unassigned"
+            let mediaType = known?.mediaTypeName ?? "-"
+            let rememberedSuffix = known == nil ? "" : " [remembered]"
+            let source = identity?.source.displayLabel ?? "unassigned"
+            if let metadata {
+                try? deviceStore.upsert(deviceUUID: metadata.deviceUUID, candidate: device)
+            }
+            print(
+                "\(displayName)\t\(device.devicePath)\t\(device.formattedSize)\t\(deviceIdentifier)\ttype:\(mediaType)\tdevice-uuid:\(source)\(rememberedSuffix)"
+            )
+        }
+    }
+
+    private static func showMediaInfo(
+        query: String,
+        scanner: DeviceScanner,
+        uuidService: UUIDMetadataService,
+        deviceStore: DeviceInventoryStore
+    ) throws {
+        guard let medium = deviceStore.findDevice(matching: query) else {
+            throw FlashError.usage("No remembered medium found for: \(query)")
+        }
+
+        let connectedDevice = try scanner.scanEligibleDevices().first { device in
+            uuidService.resolveIdentity(for: device)?.metadata.deviceUUID == medium.deviceUUID
+        }
+        let connectedIdentity = connectedDevice.flatMap { uuidService.resolveIdentity(for: $0) }
+        let customName = medium.customName ?? "-"
+        let identification = connectedIdentity?.source.displayLabel ?? "unknown"
+        let mediaType = medium.mediaTypeName ?? "-"
+
+        print("Media: \(medium.displayName)")
+        print("Device UUID: \(medium.deviceUUID)")
+        print("Custom Name: \(customName)")
+        print("Media Type: \(mediaType)")
+        print("Size: \(ByteCountFormatter.string(fromByteCount: medium.size, countStyle: .file))")
+        print("First Seen: \(medium.firstSeen.ISO8601Format())")
+        print("Last Seen: \(medium.lastSeen.ISO8601Format())")
+        if let connectedDevice {
+            print("Connected: yes")
+            print("Current Device: \(connectedDevice.devicePath)")
+            print("Identification: \(identification)")
+        } else {
+            print("Connected: no")
+        }
+        if medium.userDefinedFields.isEmpty {
+            print("User Fields: none")
+        } else {
+            print("User Fields:")
+            for key in medium.userDefinedFields.keys.sorted() {
+                if let value = medium.userDefinedFields[key] {
+                    print("  \(key): \(value)")
+                }
+            }
+        }
+    }
+
+    private struct Services {
+        let imageStore: ImageCatalogStore
+        let deviceStore: DeviceInventoryStore
+        let historyStore: FlashHistoryStore
+        let scanner: DeviceScanner
+        let deviceManager: DiskArbitrationManager
+        let prompt: PromptRenderer
+        let uuidService: UUIDMetadataService
+
+        var flashService: FlashService {
+            FlashService(
+                scanner: scanner,
+                deviceManager: deviceManager,
+                writer: FlashWriter(),
+                verifier: FlashVerifier(),
+                uuidService: uuidService,
+                imageStore: imageStore,
+                deviceStore: deviceStore,
+                historyStore: historyStore
+            )
+        }
     }
 }
