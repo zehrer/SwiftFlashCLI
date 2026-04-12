@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import Testing
 @testable import SwiftFlashCore
@@ -159,5 +160,61 @@ struct UUIDMetadataServiceTests {
         let resolved = service.resolveIdentity(for: device)
         #expect(resolved?.source == .file)
         #expect(resolved?.metadata.deviceUUID == identity?.metadata.deviceUUID)
+    }
+
+    @Test
+    func trailerReadReportsPermissionDenied() throws {
+        let service = UUIDMetadataService()
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {
+            _ = chmod(tempURL.path, 0o600)
+            try? FileManager.default.removeItem(at: tempURL)
+        }
+
+        try Data(count: 2 * 1024 * 1024).write(to: tempURL)
+        #expect(chmod(tempURL.path, 0o000) == 0)
+
+        let result = service.readTrailerMetadataResult(
+            fromDevicePath: tempURL.path,
+            deviceSize: 2 * 1024 * 1024
+        )
+        #expect(result == .permissionDenied)
+    }
+
+    @Test
+    func ensureDeviceIdentityDoesNotCreateWhenTrailerRequiresSudo() throws {
+        let service = UUIDMetadataService()
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer {
+            _ = chmod(tempURL.path, 0o600)
+            try? FileManager.default.removeItem(at: tempURL)
+        }
+
+        try Data(count: 2 * 1024 * 1024).write(to: tempURL)
+        #expect(chmod(tempURL.path, 0o000) == 0)
+
+        let device = DiskCandidate(
+            devicePath: tempURL.path,
+            rawDevicePath: tempURL.path,
+            bsdName: "disk-test",
+            physicalDeviceID: "scan-hint",
+            name: "Test Device",
+            vendor: nil,
+            model: nil,
+            protocolName: nil,
+            serialNumber: nil,
+            size: 2 * 1024 * 1024,
+            isInternal: false,
+            isRemovable: true,
+            isEjectable: true,
+            isWritable: true,
+            isWhole: true,
+            mediaUUID: nil,
+            mediaKind: nil,
+            partitions: []
+        )
+
+        let status = service.ensureDeviceIdentityStatus(for: device)
+        #expect(status == .trailerRequiresSudo)
     }
 }

@@ -391,6 +391,43 @@ public struct ResolvedDeviceIdentity: Equatable, Sendable {
     }
 }
 
+public enum DeviceIdentityStatus: Equatable, Sendable {
+    case identified(ResolvedDeviceIdentity)
+    case unassigned
+    case trailerRequiresSudo
+
+    public var resolvedIdentity: ResolvedDeviceIdentity? {
+        switch self {
+        case .identified(let identity):
+            return identity
+        case .unassigned, .trailerRequiresSudo:
+            return nil
+        }
+    }
+
+    public var deviceUUIDDisplay: String {
+        switch self {
+        case .identified(let identity):
+            return identity.metadata.deviceUUID
+        case .unassigned:
+            return "unassigned"
+        case .trailerRequiresSudo:
+            return "unknown"
+        }
+    }
+
+    public var sourceDisplay: String {
+        switch self {
+        case .identified(let identity):
+            return identity.source.displayLabel
+        case .unassigned:
+            return "unassigned"
+        case .trailerRequiresSudo:
+            return "unknown (sudo required for trailer)"
+        }
+    }
+}
+
 public struct FlashCompletion: Equatable, Sendable {
     public var previousIdentity: ResolvedDeviceIdentity?
     public var metadata: FlashUUIDMetadata

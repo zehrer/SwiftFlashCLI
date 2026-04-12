@@ -254,16 +254,16 @@ struct SwiftFlashCLI {
 
         let knownByID = Dictionary(uniqueKeysWithValues: deviceStore.allDevices().map { ($0.deviceUUID, $0) })
         for device in scanned {
-            let identity = identifyNewMedia
-                ? uuidService.ensureDeviceIdentity(for: device)
-                : uuidService.resolveIdentity(for: device)
-            let metadata = identity?.metadata
+            let identityStatus = identifyNewMedia
+                ? uuidService.ensureDeviceIdentityStatus(for: device)
+                : uuidService.resolveIdentityStatus(for: device)
+            let metadata = identityStatus.resolvedIdentity?.metadata
             let known = metadata.flatMap { knownByID[$0.deviceUUID] }
             let displayName = known?.displayName ?? device.displayName
-            let deviceIdentifier = metadata?.deviceUUID ?? "unassigned"
+            let deviceIdentifier = identityStatus.deviceUUIDDisplay
             let mediaType = known?.mediaTypeName ?? "-"
             let rememberedSuffix = known == nil ? "" : " [remembered]"
-            let source = identity?.source.displayLabel ?? "unassigned"
+            let source = identityStatus.sourceDisplay
             if let metadata {
                 try? deviceStore.upsert(deviceUUID: metadata.deviceUUID, candidate: device)
             }
@@ -283,12 +283,16 @@ struct SwiftFlashCLI {
             throw FlashError.usage("No remembered medium found for: \(query)")
         }
 
-        let connectedDevice = try scanner.scanEligibleDevices().first { device in
-            uuidService.resolveIdentity(for: device)?.metadata.deviceUUID == medium.deviceUUID
+        let scannedDevices = try scanner.scanEligibleDevices()
+        let statusByDevicePath = Dictionary(
+            uniqueKeysWithValues: scannedDevices.map { ($0.devicePath, uuidService.resolveIdentityStatus(for: $0)) }
+        )
+        let connectedDevice = scannedDevices.first { device in
+            statusByDevicePath[device.devicePath]?.resolvedIdentity?.metadata.deviceUUID == medium.deviceUUID
         }
-        let connectedIdentity = connectedDevice.flatMap { uuidService.resolveIdentity(for: $0) }
+        let connectedIdentityStatus = connectedDevice.flatMap { statusByDevicePath[$0.devicePath] }
         let customName = medium.customName ?? "-"
-        let identification = connectedIdentity?.source.displayLabel ?? "unknown"
+        let identification = connectedIdentityStatus?.sourceDisplay ?? "unknown"
         let mediaType = medium.mediaTypeName ?? "-"
 
         print("Media: \(medium.displayName)")
@@ -304,6 +308,9 @@ struct SwiftFlashCLI {
             print("Identification: \(identification)")
         } else {
             print("Connected: no")
+            if scannedDevices.contains(where: { statusByDevicePath[$0.devicePath] == .trailerRequiresSudo }) {
+                print("Note: some connected media require sudo to inspect trailer metadata")
+            }
         }
         if medium.userDefinedFields.isEmpty {
             print("User Fields: none")
