@@ -62,6 +62,7 @@ public final class FlashService {
             let refreshed = try await rescanDevice(path: device.devicePath)
             let mounted = try await mountWritablePartitions(of: refreshed ?? device)
             let checksum = try? ImageSupport.calculateSHA256(for: image.url)
+            let imageIdentity = uuidService.readImageIdentity(from: mounted)
             let deviceUUID = previousMetadata?.deviceUUID ?? UUID().uuidString
             let metadata = FlashUUIDMetadata(
                 flashUUID: UUID(),
@@ -70,7 +71,8 @@ public final class FlashService {
                 imagePath: image.sourcePath,
                 imageName: image.name,
                 imageSHA256: checksum,
-                flashedAt: Date()
+                flashedAt: Date(),
+                image: imageIdentity
             )
             let writeResult = uuidService.writeMetadata(
                 metadata,
@@ -104,7 +106,8 @@ public final class FlashService {
                     previousFlashUUID: previousMetadata?.flashUUID,
                     newFlashUUID: metadata.flashUUID,
                     uuidWriteSucceeded: writeResult.anyWritten,
-                    result: result
+                    result: result,
+                    image: imageIdentity
                 )
             )
             return FlashCompletion(

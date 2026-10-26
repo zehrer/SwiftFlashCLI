@@ -6,6 +6,20 @@ public enum ImagePreparationStep: Equatable, Sendable {
     case decompress
 }
 
+public struct ImagePreparationProgress: Equatable, Sendable {
+    public var step: ImagePreparationStep
+    /// Overall completion of the step, 0...1.
+    public var fraction: Double
+    /// Bytes downloaded, or bytes unpacked so far.
+    public var processedBytes: Int64
+
+    public init(step: ImagePreparationStep, fraction: Double, processedBytes: Int64) {
+        self.step = step
+        self.fraction = fraction
+        self.processedBytes = processedBytes
+    }
+}
+
 /// A flashable image plus the temporary files that were created to get it.
 public struct PreparedImage: Equatable, Sendable {
     public var image: ImageDescriptor
@@ -40,7 +54,7 @@ public final class ImagePreparer: Sendable {
 
     public func prepare(
         source: String,
-        progress: @escaping @Sendable (ImagePreparationStep, _ completedBytes: Int64, _ totalBytes: Int64) -> Void
+        progress: @escaping @Sendable (ImagePreparationProgress) -> Void
     ) async throws -> PreparedImage {
         var temporaryDirectory: URL?
         do {
@@ -56,7 +70,7 @@ public final class ImagePreparer: Sendable {
                 temporaryDirectory = directory
                 localURL = directory.appendingPathComponent(remoteURL.lastPathComponent)
                 try await ImageDownloader.download(from: remoteURL, to: localURL) { completed, total in
-                    progress(.download, completed, total)
+                    progress(ImagePreparationProgress(step: .download, fraction: Double(completed) / Double(total), processedBytes: completed))
                 }
                 sourceLocation = source
             } else {
@@ -72,8 +86,8 @@ public final class ImagePreparer: Sendable {
                 let directory = try temporaryDirectory ?? Self.makeTemporaryDirectory()
                 temporaryDirectory = directory
                 let decompressedURL = directory.appendingPathComponent(localURL.deletingPathExtension().lastPathComponent)
-                try Self.decompressXZ(from: localURL, to: decompressedURL) { completed, total in
-                    progress(.decompress, completed, total)
+                try Self.decompressXZ(from: localURL, to: decompressedURL) { consumed, total, produced in
+                    progress(ImagePreparationProgress(step: .decompress, fraction: Double(consumed) / Double(total), processedBytes: produced))
                 }
                 if Self.isRemote(source) {
                     try? FileManager.default.removeItem(at: localURL)
@@ -104,7 +118,7 @@ public final class ImagePreparer: Sendable {
     static func decompressXZ(
         from source: URL,
         to destination: URL,
-        progress: (_ consumedBytes: Int64, _ totalBytes: Int64) -> Void
+        progress: (_ consumedBytes: Int64, _ totalBytes: Int64, _ producedBytes: Int64) -> Void
     ) throws {
         let input = try FileHandle(forReadingFrom: source)
         defer { try? input.close() }
@@ -133,6 +147,7 @@ public final class ImagePreparer: Sendable {
         stream.pointee.src_ptr = UnsafePointer(sourceBuffer)
         stream.pointee.src_size = 0
         var consumed: Int64 = 0
+        var produced: Int64 = 0
         var reachedEndOfInput = false
 
         while true {
@@ -145,7 +160,7 @@ public final class ImagePreparer: Sendable {
                     stream.pointee.src_ptr = UnsafePointer(sourceBuffer)
                     stream.pointee.src_size = chunk.count
                     consumed += Int64(chunk.count)
-                    progress(consumed, totalSize)
+                    progress(consumed, totalSize, produced)
                 }
             }
 
@@ -154,17 +169,18 @@ public final class ImagePreparer: Sendable {
             let flags = reachedEndOfInput ? Int32(COMPRESSION_STREAM_FINALIZE.rawValue) : 0
             let status = compression_stream_process(stream, flags)
 
-            let produced = bufferSize - stream.pointee.dst_size
-            if produced > 0 {
-                try output.write(contentsOf: Data(bytes: destinationBuffer, count: produced))
+            let chunkSize = bufferSize - stream.pointee.dst_size
+            if chunkSize > 0 {
+                try output.write(contentsOf: Data(bytes: destinationBuffer, count: chunkSize))
+                produced += Int64(chunkSize)
             }
 
             switch status {
             case COMPRESSION_STATUS_END:
-                progress(totalSize, totalSize)
+                progress(totalSize, totalSize, produced)
                 return
             case COMPRESSION_STATUS_OK:
-                if reachedEndOfInput && produced == 0 {
+                if reachedEndOfInput && chunkSize == 0 {
                     throw FlashError.invalidImage("xz image is truncated: \(source.lastPathComponent)")
                 }
             default:

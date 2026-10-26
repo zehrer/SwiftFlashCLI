@@ -27,6 +27,23 @@ public final class UUIDMetadataService {
         return nil
     }
 
+    /// Reads the image-provided `image` block from the first mounted `/.uuid` that has one.
+    /// Works for files shipped by an image build (without device or flash UUIDs) and for files written by SwiftFlash.
+    public func readImageIdentity(from partitions: [PartitionVolume]) -> ImageIdentity? {
+        for partition in partitions {
+            guard let mountPoint = partition.mountPoint else { continue }
+            let url = URL(fileURLWithPath: mountPoint).appendingPathComponent(".uuid")
+            guard let data = try? Data(contentsOf: url),
+                  let file = try? JSONCoding.decoder.decode(ImageUUIDFile.self, from: data),
+                  let image = file.image
+            else {
+                continue
+            }
+            return image
+        }
+        return nil
+    }
+
     public func readExistingMetadata(from device: DiskCandidate) -> FlashUUIDMetadata? {
         resolveIdentityStatus(for: device).resolvedIdentity?.metadata
     }
@@ -69,7 +86,8 @@ public final class UUIDMetadataService {
             imagePath: "",
             imageName: "",
             imageSHA256: nil,
-            flashedAt: Date()
+            flashedAt: Date(),
+            image: readImageIdentity(from: device.partitions)
         )
 
         guard writeFileMetadata(metadata, to: device.partitions) else {
@@ -145,7 +163,12 @@ public final class UUIDMetadataService {
         _ metadata: FlashUUIDMetadata,
         to partitions: [PartitionVolume]
     ) -> Bool {
-        guard let target = partitions.first(where: { ($0.mountPoint?.isEmpty == false) && $0.isWritable }),
+        let writable = partitions.filter { ($0.mountPoint?.isEmpty == false) && $0.isWritable }
+        // Prefer the partition that already has a `.uuid` (e.g. shipped by the image) so there is only one.
+        let existing = writable.first { partition in
+            FileManager.default.fileExists(atPath: URL(fileURLWithPath: partition.mountPoint!).appendingPathComponent(".uuid").path)
+        }
+        guard let target = existing ?? writable.first,
               let mountPoint = target.mountPoint
         else {
             return false

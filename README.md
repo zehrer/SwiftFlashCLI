@@ -21,7 +21,7 @@ The current version provides:
 - remembered device UUID inventory
 - configurable media types with preconfigured defaults
 - flash history persistence
-- best-effort `.uuid` metadata read/write on flashed media
+- best-effort `.uuid` metadata read/write on flashed media, including an image-provided `image` block (see [docs/uuid-file.md](docs/uuid-file.md))
 - optional post-flash verification
 - raw end-of-device trailer metadata when there is enough safe unused space
 - a reusable `SwiftFlashCore` library target for later GUI integration
@@ -167,7 +167,7 @@ The implemented flashing flow is:
 7. Optionally verify the raw device contents against the source image before metadata is written.
 8. Flush data with `fsync` and `F_FULLFSYNC` where available.
 9. Attempt to remount writable partitions.
-10. Write a new `/.uuid` JSON file if a writable mounted partition is available.
+10. Write a new `/.uuid` JSON file if a writable mounted partition is available, keeping the `image` block an image may ship in its own `/.uuid` ([format](docs/uuid-file.md)).
 11. If no writable filesystem is available and enough slack remains after the image, write trailer metadata in the last 4 KiB of the device.
 12. Persist image usage, device inventory, and flash history.
 13. Delete temporary downloaded or unpacked image files.

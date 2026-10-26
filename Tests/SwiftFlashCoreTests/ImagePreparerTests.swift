@@ -11,7 +11,7 @@ struct ImagePreparerTests {
         let imageURL = directory.appendingPathComponent("plain.img")
         try Data(count: 1024 * 1024).write(to: imageURL)
 
-        let prepared = try await ImagePreparer().prepare(source: imageURL.path) { _, _, _ in }
+        let prepared = try await ImagePreparer().prepare(source: imageURL.path) { _ in }
 
         #expect(prepared.hasTemporaryFiles == false)
         #expect(prepared.image.url.path == imageURL.path)
@@ -30,7 +30,7 @@ struct ImagePreparerTests {
         let compressedURL = directory.appendingPathComponent("disk.img.xz")
         try encodeXZ(payload).write(to: compressedURL)
 
-        let prepared = try await ImagePreparer().prepare(source: compressedURL.path) { _, _, _ in }
+        let prepared = try await ImagePreparer().prepare(source: compressedURL.path) { _ in }
 
         #expect(prepared.image.name == "disk.img")
         #expect(prepared.image.size == Int64(payload.count))
@@ -50,7 +50,7 @@ struct ImagePreparerTests {
         try Data(repeating: 0x42, count: 4096).write(to: compressedURL)
 
         await #expect(throws: FlashError.self) {
-            _ = try await ImagePreparer().prepare(source: compressedURL.path) { _, _, _ in }
+            _ = try await ImagePreparer().prepare(source: compressedURL.path) { _ in }
         }
     }
 
@@ -75,7 +75,7 @@ struct ImagePreparerTests {
     func remoteImageIsDownloadedAndCleanedUp() async throws {
         let source = try #require(ProcessInfo.processInfo.environment["SWIFTFLASH_TEST_IMAGE_URL"])
 
-        let prepared = try await ImagePreparer().prepare(source: source) { _, _, _ in }
+        let prepared = try await ImagePreparer().prepare(source: source) { _ in }
 
         #expect(prepared.hasTemporaryFiles)
         #expect(prepared.image.sourceLocation == source)

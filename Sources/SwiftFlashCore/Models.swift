@@ -230,6 +230,7 @@ public struct FlashHistoryEntry: Codable, Equatable, Sendable {
     public var newFlashUUID: UUID?
     public var uuidWriteSucceeded: Bool
     public var result: String
+    public var image: ImageIdentity?
 
     public init(
         startedAt: Date,
@@ -240,7 +241,8 @@ public struct FlashHistoryEntry: Codable, Equatable, Sendable {
         previousFlashUUID: UUID?,
         newFlashUUID: UUID?,
         uuidWriteSucceeded: Bool,
-        result: String
+        result: String,
+        image: ImageIdentity? = nil
     ) {
         self.startedAt = startedAt
         self.finishedAt = finishedAt
@@ -251,6 +253,7 @@ public struct FlashHistoryEntry: Codable, Equatable, Sendable {
         self.newFlashUUID = newFlashUUID
         self.uuidWriteSucceeded = uuidWriteSucceeded
         self.result = result
+        self.image = image
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -264,6 +267,7 @@ public struct FlashHistoryEntry: Codable, Equatable, Sendable {
         case newFlashUUID
         case uuidWriteSucceeded
         case result
+        case image
     }
 
     public init(from decoder: Decoder) throws {
@@ -278,6 +282,7 @@ public struct FlashHistoryEntry: Codable, Equatable, Sendable {
         newFlashUUID = try container.decodeIfPresent(UUID.self, forKey: .newFlashUUID)
         uuidWriteSucceeded = try container.decode(Bool.self, forKey: .uuidWriteSucceeded)
         result = try container.decode(String.self, forKey: .result)
+        image = try container.decodeIfPresent(ImageIdentity.self, forKey: .image)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -291,6 +296,7 @@ public struct FlashHistoryEntry: Codable, Equatable, Sendable {
         try container.encodeIfPresent(newFlashUUID, forKey: .newFlashUUID)
         try container.encode(uuidWriteSucceeded, forKey: .uuidWriteSucceeded)
         try container.encode(result, forKey: .result)
+        try container.encodeIfPresent(image, forKey: .image)
     }
 }
 
@@ -303,6 +309,8 @@ public struct FlashUUIDMetadata: Codable, Equatable, Sendable {
     public var imageName: String
     public var imageSHA256: String?
     public var flashedAt: Date
+    /// Identification provided by the image itself; copied unchanged from the image's `/.uuid`.
+    public var image: ImageIdentity?
 
     public init(
         schemaVersion: Int = 1,
@@ -312,7 +320,8 @@ public struct FlashUUIDMetadata: Codable, Equatable, Sendable {
         imagePath: String,
         imageName: String,
         imageSHA256: String?,
-        flashedAt: Date
+        flashedAt: Date,
+        image: ImageIdentity? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.flashUUID = flashUUID
@@ -322,6 +331,7 @@ public struct FlashUUIDMetadata: Codable, Equatable, Sendable {
         self.imageName = imageName
         self.imageSHA256 = imageSHA256
         self.flashedAt = flashedAt
+        self.image = image
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -335,6 +345,7 @@ public struct FlashUUIDMetadata: Codable, Equatable, Sendable {
         case imageName
         case imageSHA256
         case flashedAt
+        case image
     }
 
     public init(from decoder: Decoder) throws {
@@ -349,6 +360,7 @@ public struct FlashUUIDMetadata: Codable, Equatable, Sendable {
         imageName = try container.decode(String.self, forKey: .imageName)
         imageSHA256 = try container.decodeIfPresent(String.self, forKey: .imageSHA256)
         flashedAt = try container.decode(Date.self, forKey: .flashedAt)
+        image = try container.decodeIfPresent(ImageIdentity.self, forKey: .image)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -361,6 +373,7 @@ public struct FlashUUIDMetadata: Codable, Equatable, Sendable {
         try container.encode(imageName, forKey: .imageName)
         try container.encodeIfPresent(imageSHA256, forKey: .imageSHA256)
         try container.encode(flashedAt, forKey: .flashedAt)
+        try container.encodeIfPresent(image, forKey: .image)
     }
 }
 

@@ -73,6 +73,9 @@ struct SwiftFlashCLI {
                 if let flashUUID = completion.metadata.flashUUID {
                     print("Flash UUID written: \(flashUUID.uuidString)")
                 }
+                if let imageLabel = completion.metadata.image?.displayLabel {
+                    print("Image identity kept: \(imageLabel)")
+                }
                 print("Metadata stored in: \(completion.writeResult.storageDescription)")
                 print("Flash completed")
 
@@ -190,7 +193,8 @@ struct SwiftFlashCLI {
                     print("No flash history")
                 } else {
                     for entry in history {
-                        print("\(entry.finishedAt.ISO8601Format())\t\(entry.imageName)\t\(entry.deviceUUID)\t\(entry.result)")
+                        let imageLabel = entry.image?.displayLabel ?? "-"
+                        print("\(entry.finishedAt.ISO8601Format())\t\(entry.imageName)\t\(imageLabel)\t\(entry.deviceUUID)\t\(entry.result)")
                     }
                 }
 
@@ -238,8 +242,8 @@ struct SwiftFlashCLI {
     ) async throws -> PreparedImage {
         let resolvedPath = try path ?? prompt.selectImage(from: imageStore.allImages())
         let progress = PreparationProgress()
-        let prepared = try await ImagePreparer().prepare(source: resolvedPath) { step, completed, total in
-            progress.update(step: step, completedBytes: completed, totalBytes: total)
+        let prepared = try await ImagePreparer().prepare(source: resolvedPath) { update in
+            progress.update(update)
         }
         progress.finish()
         return prepared
@@ -251,22 +255,22 @@ struct SwiftFlashCLI {
         print("Removed temporary image files")
     }
 
-    /// Shows one progress bar per preparation step (download, unpack); the total is only known once a step starts.
+    /// Shows one progress bar per preparation step (download, unpack) with the bytes downloaded or unpacked so far.
     private final class PreparationProgress: @unchecked Sendable {
         private let lock = NSLock()
         private var step: ImagePreparationStep?
         private var renderer: ConsoleProgressRenderer?
 
-        func update(step: ImagePreparationStep, completedBytes: Int64, totalBytes: Int64) {
+        func update(_ update: ImagePreparationProgress) {
             lock.lock()
             defer { lock.unlock() }
-            if step != self.step {
+            if update.step != step {
                 finishLocked()
-                self.step = step
-                let label = step == .download ? "Download" : "Unpack"
-                renderer = ConsoleProgressRenderer(label: label, totalBytes: totalBytes)
+                step = update.step
+                let label = update.step == .download ? "Download" : "Unpack"
+                renderer = ConsoleProgressRenderer(label: label, totalBytes: 0)
             }
-            renderer?.update(progress: Double(completedBytes) / Double(max(totalBytes, 1)))
+            renderer?.update(progress: update.fraction, processedBytes: update.processedBytes)
         }
 
         func finish() {
@@ -327,11 +331,12 @@ struct SwiftFlashCLI {
             let mediaType = known?.mediaTypeName ?? "-"
             let rememberedSuffix = known == nil ? "" : " [remembered]"
             let source = identityStatus.sourceDisplay
+            let imageLabel = (metadata?.image ?? uuidService.readImageIdentity(from: device.partitions))?.displayLabel ?? "-"
             if let metadata {
                 try? deviceStore.upsert(deviceUUID: metadata.deviceUUID, candidate: device)
             }
             print(
-                "\(displayName)\t\(device.devicePath)\t\(device.formattedSize)\t\(deviceIdentifier)\ttype:\(mediaType)\tdevice-uuid:\(source)\(rememberedSuffix)"
+                "\(displayName)\t\(device.devicePath)\t\(device.formattedSize)\t\(deviceIdentifier)\ttype:\(mediaType)\timage:\(imageLabel)\tdevice-uuid:\(source)\(rememberedSuffix)"
             )
         }
     }
@@ -370,6 +375,11 @@ struct SwiftFlashCLI {
             print("Connected: yes")
             print("Current Device: \(connectedDevice.devicePath)")
             print("Identification: \(identification)")
+            let image = connectedIdentityStatus?.resolvedIdentity?.metadata.image
+            print("Image: \(image?.displayLabel ?? "-")")
+            if let build = image?.build {
+                print("Image Build: \(build)")
+            }
         } else {
             print("Connected: no")
             if scannedDevices.contains(where: { statusByDevicePath[$0.devicePath] == .trailerRequiresSudo }) {
