@@ -9,6 +9,7 @@ public final class UUIDMetadataService {
     enum TrailerMetadataReadResult: Equatable {
         case metadata(FlashUUIDMetadata)
         case notPresent
+        case corrupt
         case permissionDenied
     }
 
@@ -43,7 +44,7 @@ public final class UUIDMetadataService {
             return .identified(ResolvedDeviceIdentity(metadata: metadata, source: .trailer))
         case .permissionDenied:
             return .trailerRequiresSudo
-        case .notPresent:
+        case .notPresent, .corrupt:
             return .unassigned
         }
     }
@@ -81,7 +82,7 @@ public final class UUIDMetadataService {
         switch readTrailerMetadataResult(fromDevicePath: devicePath, deviceSize: deviceSize) {
         case .metadata(let metadata):
             return metadata
-        case .notPresent, .permissionDenied:
+        case .notPresent, .corrupt, .permissionDenied:
             return nil
         }
     }
@@ -104,9 +105,6 @@ public final class UUIDMetadataService {
         var buffer = [UInt8](repeating: 0, count: Self.trailerBlockSize)
         let bytesRead = pread(fd, &buffer, Self.trailerBlockSize, offset)
         guard bytesRead > 0 else {
-            if bytesRead < 0, errno == EACCES || errno == EPERM {
-                return .permissionDenied
-            }
             return .notPresent
         }
 
@@ -118,11 +116,11 @@ public final class UUIDMetadataService {
         let payload = data.dropFirst(Self.trailerMagic.utf8.count)
         let trimmed = payload.prefix { $0 != 0 }
         guard !trimmed.isEmpty else {
-            return .notPresent
+            return .corrupt
         }
 
         guard let metadata = try? JSONCoding.decoder.decode(FlashUUIDMetadata.self, from: Data(trimmed)) else {
-            return .notPresent
+            return .corrupt
         }
         return .metadata(metadata)
     }

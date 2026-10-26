@@ -285,7 +285,8 @@ struct SwiftFlashCLI {
 
         let scannedDevices = try scanner.scanEligibleDevices()
         let statusByDevicePath = Dictionary(
-            uniqueKeysWithValues: scannedDevices.map { ($0.devicePath, uuidService.resolveIdentityStatus(for: $0)) }
+            scannedDevices.map { ($0.devicePath, uuidService.resolveIdentityStatus(for: $0)) },
+            uniquingKeysWith: { first, _ in first }
         )
         let connectedDevice = scannedDevices.first { device in
             statusByDevicePath[device.devicePath]?.resolvedIdentity?.metadata.deviceUUID == medium.deviceUUID

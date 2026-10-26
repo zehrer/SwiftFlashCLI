@@ -182,6 +182,26 @@ struct UUIDMetadataServiceTests {
     }
 
     @Test
+    func trailerReadReportsCorruptPayload() throws {
+        let service = UUIDMetadataService()
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        let deviceSize = 2 * 1024 * 1024
+        var data = Data(count: deviceSize)
+        let trailer = Data("SWFLASH-TRAILER-V1\n{not json".utf8)
+        let offset = deviceSize - UUIDMetadataService.trailerBlockSize
+        data.replaceSubrange(offset..<(offset + trailer.count), with: trailer)
+        try data.write(to: tempURL)
+
+        let result = service.readTrailerMetadataResult(
+            fromDevicePath: tempURL.path,
+            deviceSize: Int64(deviceSize)
+        )
+        #expect(result == .corrupt)
+    }
+
+    @Test
     func ensureDeviceIdentityDoesNotCreateWhenTrailerRequiresSudo() throws {
         let service = UUIDMetadataService()
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
