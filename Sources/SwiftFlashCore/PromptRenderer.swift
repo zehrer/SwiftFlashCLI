@@ -68,7 +68,7 @@ public final class PromptRenderer: @unchecked Sendable {
 
     public func confirmFlash(image: ImageDescriptor, device: DiskCandidate) -> Bool {
         print("About to erase \(device.displayName) (\(device.devicePath), \(device.formattedSize))")
-        print("Image: \(image.url.path) (\(ByteCountFormatter.string(fromByteCount: image.size, countStyle: .file)))")
+        print("Image: \(image.sourcePath) (\(ByteCountFormatter.string(fromByteCount: image.size, countStyle: .file)))")
         print("Continue? [y/N]")
         let answer = readLine(strippingNewline: true)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return answer == "y" || answer == "yes"

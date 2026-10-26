@@ -79,7 +79,7 @@ public final class ImageCatalogStore {
     public func remember(image: ImageDescriptor) throws {
         try configStore.update { config in
             let now = Date()
-            if let index = config.rememberedImages.firstIndex(where: { $0.path == image.url.path }) {
+            if let index = config.rememberedImages.firstIndex(where: { $0.path == image.sourcePath }) {
                 config.rememberedImages[index].displayName = image.name
                 config.rememberedImages[index].size = image.size
                 config.rememberedImages[index].sha256 = image.checksum
@@ -87,7 +87,7 @@ public final class ImageCatalogStore {
             } else {
                 config.rememberedImages.insert(
                     RememberedImage(
-                        path: image.url.path,
+                        path: image.sourcePath,
                         displayName: image.name,
                         size: image.size,
                         sha256: image.checksum,
@@ -98,6 +98,27 @@ public final class ImageCatalogStore {
                 )
             }
             config.rememberedImages.sort { $0.lastUsed > $1.lastUsed }
+        }
+    }
+
+    /// Removes remembered images whose path or display name matches `query`.
+    /// Returns the number of removed entries.
+    @discardableResult
+    public func remove(matching query: String) throws -> Int {
+        var removed = 0
+        try configStore.update { config in
+            let before = config.rememberedImages.count
+            config.rememberedImages.removeAll { image in
+                image.path == query || image.displayName.caseInsensitiveCompare(query) == .orderedSame
+            }
+            removed = before - config.rememberedImages.count
+        }
+        return removed
+    }
+
+    public func clear() throws {
+        try configStore.update { config in
+            config.rememberedImages.removeAll()
         }
     }
 }

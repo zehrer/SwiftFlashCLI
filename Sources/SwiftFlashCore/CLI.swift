@@ -15,7 +15,7 @@ public enum CLIParser {
         case "identify":
             return .mediaIdentify
         case "images":
-            return .images
+            return try parseImagesArguments(Array(args.dropFirst()))
         case "media":
             return try parseMediaArguments(Array(args.dropFirst()))
         case "devices":
@@ -128,6 +128,29 @@ public enum CLIParser {
 
         let (imagePath, devicePath) = parseImageAndDeviceArguments(positional)
         return .flash(imagePath: imagePath, devicePath: devicePath, skipConfirmation: skipConfirmation)
+    }
+
+    private static func parseImagesArguments(_ args: [String]) throws -> FlashCommand {
+        guard let subcommand = args.first else {
+            return .images
+        }
+
+        switch subcommand {
+        case "list":
+            return .images
+        case "clear":
+            guard args.count == 1 else {
+                throw FlashError.usage("Usage: swiftflash images clear")
+            }
+            return .imagesClear
+        case "remove":
+            guard args.count >= 2 else {
+                throw FlashError.usage("Usage: swiftflash images remove <name-or-path>")
+            }
+            return .imagesRemove(query: args[1...].joined(separator: " "))
+        default:
+            throw FlashError.usage("Unknown images subcommand: \(subcommand)")
+        }
     }
 
     private static func parseHistoryArguments(_ args: [String]) throws -> FlashCommand {
@@ -257,8 +280,10 @@ public struct HelpRenderer {
     Verify a flashed image against a raw device:
       sudo swiftflash verify [image_file] [/dev/diskX]
 
-    List remembered images:
+    List or manage remembered images:
       swiftflash images
+      swiftflash images remove <name-or-path>
+      swiftflash images clear
 
     List currently connected eligible flash media:
       swiftflash media list

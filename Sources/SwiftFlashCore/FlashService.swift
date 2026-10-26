@@ -67,7 +67,7 @@ public final class FlashService {
                 flashUUID: UUID(),
                 deviceUUID: deviceUUID,
                 deviceName: device.displayName,
-                imagePath: image.url.path,
+                imagePath: image.sourcePath,
                 imageName: image.name,
                 imageSHA256: checksum,
                 flashedAt: Date()
@@ -79,12 +79,14 @@ public final class FlashService {
                 mountedPartitions: mounted
             )
 
-            try imageStore.remember(image: ImageDescriptor(url: image.url, size: image.size, checksum: checksum))
+            try imageStore.remember(
+                image: ImageDescriptor(url: image.url, size: image.size, checksum: checksum, sourceLocation: image.sourceLocation)
+            )
             try deviceStore.upsert(deviceUUID: deviceUUID, candidate: refreshed ?? device)
             try historyStore.upsertFlashMedia(
                 KnownFlashMedia(
                     flashUUID: metadata.flashUUID ?? UUID(),
-                    lastImagePath: image.url.path,
+                    lastImagePath: image.sourcePath,
                     lastImageName: image.name,
                     deviceUUID: deviceUUID,
                     flashedAt: metadata.flashedAt,
@@ -96,7 +98,7 @@ public final class FlashService {
                 FlashHistoryEntry(
                     startedAt: startedAt,
                     finishedAt: Date(),
-                    imagePath: image.url.path,
+                    imagePath: image.sourcePath,
                     imageName: image.name,
                     deviceUUID: deviceUUID,
                     previousFlashUUID: previousMetadata?.flashUUID,
@@ -116,7 +118,7 @@ public final class FlashService {
                 FlashHistoryEntry(
                     startedAt: startedAt,
                     finishedAt: Date(),
-                    imagePath: image.url.path,
+                    imagePath: image.sourcePath,
                     imageName: image.name,
                     deviceUUID: previousMetadata?.deviceUUID ?? "unknown",
                     previousFlashUUID: previousMetadata?.flashUUID,

@@ -155,6 +155,44 @@ struct SwiftFlashCoreTests {
     }
 
     @Test
+    func imageStoreRemovesByNameOrPathAndClears() throws {
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = try AppConfigStore(configURL: tmp)
+        let images = ImageCatalogStore(configStore: store)
+
+        try images.remember(image: ImageDescriptor(url: URL(fileURLWithPath: "/tmp/a.iso"), size: 10, checksum: nil))
+        try images.remember(image: ImageDescriptor(url: URL(fileURLWithPath: "/tmp/b.iso"), size: 10, checksum: nil))
+        try images.remember(
+            image: ImageDescriptor(
+                url: URL(fileURLWithPath: "/tmp/swiftflash-x/c.img"),
+                size: 10,
+                checksum: nil,
+                sourceLocation: "http://host/c.img.xz"
+            )
+        )
+
+        #expect(images.allImages().first?.path == "http://host/c.img.xz")
+        #expect(try images.remove(matching: "A.ISO") == 1)
+        #expect(try images.remove(matching: "http://host/c.img.xz") == 1)
+        #expect(try images.remove(matching: "missing.iso") == 0)
+        #expect(images.allImages().map(\.path) == ["/tmp/b.iso"])
+
+        try images.clear()
+        #expect(images.allImages().isEmpty)
+    }
+
+    @Test
+    func parsesImagesSubcommands() throws {
+        #expect(try CLIParser.parse(arguments: ["swiftflash", "images"]) == .images)
+        #expect(try CLIParser.parse(arguments: ["swiftflash", "images", "clear"]) == .imagesClear)
+        #expect(
+            try CLIParser.parse(arguments: ["swiftflash", "images", "remove", "my", "image.iso"])
+                == .imagesRemove(query: "my image.iso")
+        )
+        #expect(throws: FlashError.self) { try CLIParser.parse(arguments: ["swiftflash", "images", "remove"]) }
+    }
+
+    @Test
     func configStartsWithPreconfiguredMediaTypes() throws {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let store = try AppConfigStore(configURL: tmp)

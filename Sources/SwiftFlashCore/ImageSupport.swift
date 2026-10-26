@@ -3,6 +3,23 @@ import Foundation
 
 public enum ImageSupport {
     public static let supportedExtensions: Set<String> = ["iso", "img"]
+    public static let compressedExtensions: Set<String> = ["xz"]
+
+    public static func isCompressed(_ url: URL) -> Bool {
+        compressedExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    /// Checks that a file name is a supported image, optionally wrapped in a supported compression (e.g. `.img.xz`).
+    public static func validateImageName(_ fileName: String) throws {
+        var url = URL(fileURLWithPath: fileName)
+        if isCompressed(url) {
+            url = url.deletingPathExtension()
+        }
+        let ext = url.pathExtension.lowercased()
+        guard supportedExtensions.contains(ext) else {
+            throw FlashError.invalidImage("Unsupported image format: \(fileName)")
+        }
+    }
 
     public static func validateImage(at path: String) throws -> ImageDescriptor {
         let url = URL(fileURLWithPath: path)

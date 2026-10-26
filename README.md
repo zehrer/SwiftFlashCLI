@@ -1,6 +1,7 @@
 # SwiftFlashCLI
 
 `SwiftFlashCLI` is a macOS command-line tool for flashing image files such as `.iso` and `.img` to external physical drives.
+Images can also be `.xz` compressed (e.g. `.img.xz`) and can be loaded from an `http(s)` URL.
 
 It is implemented 100% in Swift and uses only system frameworks and APIs:
 - `Foundation`
@@ -8,8 +9,9 @@ It is implemented 100% in Swift and uses only system frameworks and APIs:
 - `IOKit`
 - `Darwin` / POSIX I/O
 - `CryptoKit`
+- `Compression` (xz decoding)
 
-No dependency on `diskutil`, `dd`, or other external tools is used for scanning, mounting, unmounting, or writing.
+No dependency on `diskutil`, `dd`, `xz`, `curl`, or other external tools is used for scanning, mounting, unmounting, downloading, unpacking, or writing.
 
 ## Status
 
@@ -86,6 +88,8 @@ Additional commands:
 
 ```bash
 swiftflash images
+swiftflash images remove <name-or-path>
+swiftflash images clear
 swiftflash media list
 swiftflash media known
 swiftflash media info <name-or-device-uuid>
@@ -101,6 +105,19 @@ swiftflash history
 swiftflash history clear
 sudo swiftflash verify /path/to/image.iso /dev/diskX
 ```
+
+### Compressed and remote images
+
+```bash
+sudo swiftflash /path/to/sdcard.img.xz /dev/diskX
+sudo swiftflash http://192.168.178.120:8080/redox/sdcard-redox.img.xz /dev/diskX
+```
+
+- `.xz` images are unpacked into a temporary directory before flashing; the original `.xz` file is kept.
+- Remote images are downloaded into a temporary directory.
+- All temporary files (download and unpacked image) are deleted again after flashing or verifying, also when the operation fails.
+- The remembered image list stores the original location (URL or `.xz` path), so the same source can be selected again later.
+- The temporary directory needs enough free space for the unpacked image.
 
 ### Interactive behavior
 
@@ -141,7 +158,7 @@ This layout is intended to stay compatible with future integration into the Swif
 
 The implemented flashing flow is:
 
-1. Validate the image path and file size.
+1. Download remote images and unpack `.xz` images into a temporary directory, then validate the image file and size.
 2. Scan only eligible external physical whole-disk devices.
 3. Read an existing `/.uuid` file from mounted partitions if available.
 4. Unmount the selected disk through Disk Arbitration.
@@ -153,6 +170,7 @@ The implemented flashing flow is:
 10. Write a new `/.uuid` JSON file if a writable mounted partition is available.
 11. If no writable filesystem is available and enough slack remains after the image, write trailer metadata in the last 4 KiB of the device.
 12. Persist image usage, device inventory, and flash history.
+13. Delete temporary downloaded or unpacked image files.
 
 ## Package Layout
 

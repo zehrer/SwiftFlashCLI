@@ -613,15 +613,23 @@ public struct ImageDescriptor: Equatable, Sendable {
     public var url: URL
     public var size: Int64
     public var checksum: String?
+    /// Where the image originally came from (remote URL or compressed file) when `url` is a temporary copy.
+    public var sourceLocation: String?
 
-    public init(url: URL, size: Int64, checksum: String?) {
+    public init(url: URL, size: Int64, checksum: String?, sourceLocation: String? = nil) {
         self.url = url
         self.size = size
         self.checksum = checksum
+        self.sourceLocation = sourceLocation
     }
 
     public var name: String {
         url.lastPathComponent
+    }
+
+    /// The location to remember and record: the original source if there is one, otherwise the file path.
+    public var sourcePath: String {
+        sourceLocation ?? url.path
     }
 }
 
@@ -636,6 +644,8 @@ public enum FlashCommand: Equatable, Sendable {
     case flash(imagePath: String?, devicePath: String?, skipConfirmation: Bool)
     case verify(imagePath: String?, devicePath: String?)
     case images
+    case imagesClear
+    case imagesRemove(query: String)
     case mediaList
     case mediaKnown
     case mediaInfo(query: String)

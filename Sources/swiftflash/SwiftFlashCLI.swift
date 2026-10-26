@@ -40,7 +40,9 @@ struct SwiftFlashCLI {
                     throw FlashError.requiresRoot
                 }
 
-                let image = try resolveImage(path: imagePath, imageStore: services.imageStore, prompt: services.prompt)
+                let prepared = try await resolveImage(path: imagePath, imageStore: services.imageStore, prompt: services.prompt)
+                defer { cleanup(prepared) }
+                let image = prepared.image
                 let device = try resolveDevice(path: devicePath, scanner: services.scanner, prompt: services.prompt)
                 if !skipConfirmation && !services.prompt.confirmFlash(image: image, device: device) {
                     throw FlashError.cancelled
@@ -79,7 +81,9 @@ struct SwiftFlashCLI {
                     throw FlashError.requiresRoot
                 }
 
-                let image = try resolveImage(path: imagePath, imageStore: services.imageStore, prompt: services.prompt)
+                let prepared = try await resolveImage(path: imagePath, imageStore: services.imageStore, prompt: services.prompt)
+                defer { cleanup(prepared) }
+                let image = prepared.image
                 let device = try resolveDevice(path: devicePath, scanner: services.scanner, prompt: services.prompt)
                 let verifyProgress = ConsoleProgressRenderer(label: "Verify", totalBytes: image.size)
                 print("Verifying \(image.name) against \(device.displayName) (\(device.devicePath))")
@@ -102,6 +106,17 @@ struct SwiftFlashCLI {
                         print("\(image.displayName)\t\(image.path)")
                     }
                 }
+
+            case .imagesClear:
+                try services.imageStore.clear()
+                print("Cleared remembered images")
+
+            case .imagesRemove(let query):
+                let removed = try services.imageStore.remove(matching: query)
+                guard removed > 0 else {
+                    throw FlashError.usage("No remembered image found for: \(query)")
+                }
+                print(removed == 1 ? "Removed remembered image" : "Removed \(removed) remembered images")
 
             case .mediaList:
                 try listConnectedMedia(
@@ -220,9 +235,57 @@ struct SwiftFlashCLI {
         path: String?,
         imageStore: ImageCatalogStore,
         prompt: PromptRenderer
-    ) throws -> ImageDescriptor {
+    ) async throws -> PreparedImage {
         let resolvedPath = try path ?? prompt.selectImage(from: imageStore.allImages())
-        return try ImageSupport.validateImage(at: resolvedPath)
+        let progress = PreparationProgress()
+        let prepared = try await ImagePreparer().prepare(source: resolvedPath) { step, completed, total in
+            progress.update(step: step, completedBytes: completed, totalBytes: total)
+        }
+        progress.finish()
+        return prepared
+    }
+
+    private static func cleanup(_ prepared: PreparedImage) {
+        guard prepared.hasTemporaryFiles else { return }
+        prepared.cleanup()
+        print("Removed temporary image files")
+    }
+
+    /// Shows one progress bar per preparation step (download, unpack); the total is only known once a step starts.
+    private final class PreparationProgress: @unchecked Sendable {
+        private let lock = NSLock()
+        private var step: ImagePreparationStep?
+        private var renderer: ConsoleProgressRenderer?
+
+        func update(step: ImagePreparationStep, completedBytes: Int64, totalBytes: Int64) {
+            lock.lock()
+            defer { lock.unlock() }
+            if step != self.step {
+                finishLocked()
+                self.step = step
+                let label = step == .download ? "Download" : "Unpack"
+                renderer = ConsoleProgressRenderer(label: label, totalBytes: totalBytes)
+            }
+            renderer?.update(progress: Double(completedBytes) / Double(max(totalBytes, 1)))
+        }
+
+        func finish() {
+            lock.lock()
+            defer { lock.unlock() }
+            finishLocked()
+        }
+
+        private func finishLocked() {
+            switch step {
+            case .download:
+                renderer?.finish(status: "Download complete")
+            case .decompress:
+                renderer?.finish(status: "Unpack complete")
+            case nil:
+                break
+            }
+            renderer = nil
+        }
     }
 
     private static func resolveDevice(
