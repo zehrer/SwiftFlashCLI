@@ -43,8 +43,9 @@ struct SwiftFlashCLI {
                 let prepared = try await resolveImage(path: imagePath, imageStore: services.imageStore, prompt: services.prompt)
                 defer { cleanup(prepared) }
                 let image = prepared.image
-                let device = try resolveDevice(path: devicePath, scanner: services.scanner, prompt: services.prompt)
-                if !skipConfirmation && !services.prompt.confirmFlash(image: image, device: device) {
+                let device = try resolveDevice(path: devicePath, services: services)
+                if !skipConfirmation
+                    && !services.prompt.confirmFlash(image: image, device: device, overview: overview(of: device, services: services)) {
                     throw FlashError.cancelled
                 }
 
@@ -87,7 +88,7 @@ struct SwiftFlashCLI {
                 let prepared = try await resolveImage(path: imagePath, imageStore: services.imageStore, prompt: services.prompt)
                 defer { cleanup(prepared) }
                 let image = prepared.image
-                let device = try resolveDevice(path: devicePath, scanner: services.scanner, prompt: services.prompt)
+                let device = try resolveDevice(path: devicePath, services: services)
                 let verifyProgress = ConsoleProgressRenderer(label: "Verify", totalBytes: image.size)
                 print("Verifying \(image.name) against \(device.displayName) (\(device.devicePath))")
                 try await services.flashService.verify(
@@ -292,19 +293,32 @@ struct SwiftFlashCLI {
         }
     }
 
-    private static func resolveDevice(
-        path: String?,
-        scanner: DeviceScanner,
-        prompt: PromptRenderer
-    ) throws -> DiskCandidate {
+    private static func resolveDevice(path: String?, services: Services) throws -> DiskCandidate {
         if let path {
-            if let device = try scanner.findEligibleDevice(at: path) {
+            if let device = try services.scanner.findEligibleDevice(at: path) {
                 return device
             }
             throw FlashError.deviceNotFound(path)
         }
-        let devices = try scanner.scanEligibleDevices()
-        return try prompt.selectDevice(from: devices)
+        let devices = try services.scanner.scanEligibleDevices()
+        return try services.prompt.selectDevice(from: devices) { device in
+            overview(of: device, services: services)
+        }
+    }
+
+    /// Describes a target medium: remembered name and type, and the image currently on it.
+    private static func overview(of device: DiskCandidate, services: Services) -> DeviceOverview {
+        let status = services.uuidService.resolveIdentityStatus(for: device)
+        let deviceUUID = status.resolvedIdentity?.metadata.deviceUUID
+        let knownDevice = deviceUUID.flatMap { uuid in
+            services.deviceStore.allDevices().first { $0.deviceUUID == uuid }
+        }
+        return DeviceOverview.make(
+            device: device,
+            identityStatus: status,
+            knownDevice: knownDevice,
+            imageIdentity: services.uuidService.readImageIdentity(from: device.partitions)
+        )
     }
 
     private static func listConnectedMedia(
