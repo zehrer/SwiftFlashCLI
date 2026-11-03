@@ -123,6 +123,33 @@ public final class ImageCatalogStore {
     }
 }
 
+/// Remembers which downloaded remote images were moved to the Trash, so they can be reused.
+public final class TrashedDownloadStore {
+    private let configStore: AppConfigStore
+
+    public init(configStore: AppConfigStore) {
+        self.configStore = configStore
+    }
+
+    public func entry(for sourceURL: String) -> TrashedDownload? {
+        configStore.currentConfig().trashedDownloads.first { $0.sourceURL == sourceURL }
+    }
+
+    /// Stores `download`, replacing an older entry for the same URL.
+    public func record(_ download: TrashedDownload) throws {
+        try configStore.update { config in
+            config.trashedDownloads.removeAll { $0.sourceURL == download.sourceURL }
+            config.trashedDownloads.append(download)
+        }
+    }
+
+    public func remove(sourceURL: String) throws {
+        try configStore.update { config in
+            config.trashedDownloads.removeAll { $0.sourceURL == sourceURL }
+        }
+    }
+}
+
 public final class DeviceInventoryStore {
     private let configStore: AppConfigStore
 

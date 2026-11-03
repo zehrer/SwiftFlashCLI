@@ -20,14 +20,45 @@ public struct ImagePreparationProgress: Equatable, Sendable {
     }
 }
 
+/// A freshly downloaded remote image that should go to the Trash for reuse instead of being deleted.
+public struct KeptDownload: Equatable, Sendable {
+    public var file: URL
+    public var sourceURL: String
+    public var remote: RemoteFileInfo
+}
+
+/// How a remote image was obtained from an earlier download in the Trash.
+public struct TrashReuse: Equatable, Sendable {
+    public var download: TrashedDownload
+    /// False if the server was not reachable, so the copy could not be checked for being current.
+    public var verifiedWithServer: Bool
+}
+
+/// What `ImagePreparer.finish` did with temporary files.
+public enum ImageCleanupResult: Equatable, Sendable {
+    case nothingToDo
+    case removedTemporaryFiles
+    case movedDownloadToTrash(URL)
+    case trashFailed(String)
+}
+
 /// A flashable image plus the temporary files that were created to get it.
 public struct PreparedImage: Equatable, Sendable {
     public var image: ImageDescriptor
     public var temporaryDirectory: URL?
+    public var keptDownload: KeptDownload?
+    public var trashReuse: TrashReuse?
 
-    public init(image: ImageDescriptor, temporaryDirectory: URL?) {
+    public init(
+        image: ImageDescriptor,
+        temporaryDirectory: URL?,
+        keptDownload: KeptDownload? = nil,
+        trashReuse: TrashReuse? = nil
+    ) {
         self.image = image
         self.temporaryDirectory = temporaryDirectory
+        self.keptDownload = keptDownload
+        self.trashReuse = trashReuse
     }
 
     public var hasTemporaryFiles: Bool {
@@ -44,8 +75,17 @@ public struct PreparedImage: Equatable, Sendable {
 
 /// Turns an image source (local path or http(s) URL, optionally `.xz` compressed)
 /// into a plain local image file that can be flashed.
-public final class ImagePreparer: Sendable {
-    public init() {}
+///
+/// With a `TrashedDownloadStore`, downloaded remote images are moved to the user's Trash after use
+/// and taken from there next time, as long as the server still serves the same file.
+public final class ImagePreparer {
+    private let trashStore: TrashedDownloadStore?
+    private let trash: DownloadTrash
+
+    public init(trashStore: TrashedDownloadStore? = nil, trash: DownloadTrash = .userTrash) {
+        self.trashStore = trashStore
+        self.trash = trash
+    }
 
     public static func isRemote(_ source: String) -> Bool {
         let lowercased = source.lowercased()
@@ -57,6 +97,8 @@ public final class ImagePreparer: Sendable {
         progress: @escaping @Sendable (ImagePreparationProgress) -> Void
     ) async throws -> PreparedImage {
         var temporaryDirectory: URL?
+        var keptDownload: KeptDownload?
+        var trashReuse: TrashReuse?
         do {
             var localURL: URL
             let sourceLocation: String
@@ -69,8 +111,17 @@ public final class ImagePreparer: Sendable {
                 let directory = try Self.makeTemporaryDirectory()
                 temporaryDirectory = directory
                 localURL = directory.appendingPathComponent(remoteURL.lastPathComponent)
-                try await ImageDownloader.download(from: remoteURL, to: localURL) { completed, total in
-                    progress(ImagePreparationProgress(step: .download, fraction: Double(completed) / Double(total), processedBytes: completed))
+                if let reuse = await reusableTrashedDownload(for: source, remoteURL: remoteURL),
+                   let trashedFile = reuse.download.availableFile {
+                    try FileManager.default.copyItem(at: trashedFile, to: localURL)
+                    trashReuse = reuse
+                } else {
+                    let remote = try await ImageDownloader.download(from: remoteURL, to: localURL) { completed, total in
+                        progress(ImagePreparationProgress(step: .download, fraction: Double(completed) / Double(total), processedBytes: completed))
+                    }
+                    if trashStore != nil {
+                        keptDownload = KeptDownload(file: localURL, sourceURL: source, remote: remote)
+                    }
                 }
                 sourceLocation = source
             } else {
@@ -89,7 +140,7 @@ public final class ImagePreparer: Sendable {
                 try Self.decompressXZ(from: localURL, to: decompressedURL) { consumed, total, produced in
                     progress(ImagePreparationProgress(step: .decompress, fraction: Double(consumed) / Double(total), processedBytes: produced))
                 }
-                if Self.isRemote(source) {
+                if Self.isRemote(source) && keptDownload == nil {
                     try? FileManager.default.removeItem(at: localURL)
                 }
                 localURL = decompressedURL
@@ -99,13 +150,59 @@ public final class ImagePreparer: Sendable {
             if sourceLocation != image.url.path {
                 image.sourceLocation = sourceLocation
             }
-            return PreparedImage(image: image, temporaryDirectory: temporaryDirectory)
+            return PreparedImage(
+                image: image,
+                temporaryDirectory: temporaryDirectory,
+                keptDownload: keptDownload,
+                trashReuse: trashReuse
+            )
         } catch {
             if let temporaryDirectory {
                 try? FileManager.default.removeItem(at: temporaryDirectory)
             }
             throw error
         }
+    }
+
+    /// Moves a fresh download to the Trash (and remembers it), then removes all other temporary files.
+    @discardableResult
+    public func finish(_ prepared: PreparedImage) -> ImageCleanupResult {
+        guard prepared.hasTemporaryFiles else {
+            return .nothingToDo
+        }
+        defer { prepared.cleanup() }
+
+        guard let kept = prepared.keptDownload, let trashStore else {
+            return .removedTemporaryFiles
+        }
+        do {
+            let size = (try FileManager.default.attributesOfItem(atPath: kept.file.path)[.size] as? NSNumber)?.int64Value ?? 0
+            let trashed = try trash.moveToTrash(kept.file)
+            try trashStore.record(
+                TrashedDownload(
+                    sourceURL: kept.sourceURL,
+                    trashPath: trashed.path,
+                    size: size,
+                    remote: kept.remote,
+                    downloadedAt: Date()
+                )
+            )
+            return .movedDownloadToTrash(trashed)
+        } catch {
+            return .trashFailed(error.localizedDescription)
+        }
+    }
+
+    /// The earlier download in the Trash, if it is still there and the server still serves the same file.
+    /// If the server is not reachable, the trashed copy is used without that check.
+    private func reusableTrashedDownload(for source: String, remoteURL: URL) async -> TrashReuse? {
+        guard let entry = trashStore?.entry(for: source), entry.availableFile != nil else {
+            return nil
+        }
+        guard let current = await RemoteFileInfo.fetch(from: remoteURL) else {
+            return TrashReuse(download: entry, verifiedWithServer: false)
+        }
+        return entry.matches(current) ? TrashReuse(download: entry, verifiedWithServer: true) : nil
     }
 
     static func makeTemporaryDirectory() throws -> URL {
@@ -193,8 +290,9 @@ public final class ImagePreparer: Sendable {
 private final class ImageDownloader: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     private let destination: URL
     private let progress: @Sendable (Int64, Int64) -> Void
-    private var continuation: CheckedContinuation<Void, Error>?
+    private var continuation: CheckedContinuation<RemoteFileInfo, Error>?
     private var finishError: Error?
+    private var remote = RemoteFileInfo()
 
     private init(destination: URL, progress: @escaping @Sendable (Int64, Int64) -> Void) {
         self.destination = destination
@@ -205,11 +303,11 @@ private final class ImageDownloader: NSObject, URLSessionDownloadDelegate, @unch
         from url: URL,
         to destination: URL,
         progress: @escaping @Sendable (Int64, Int64) -> Void
-    ) async throws {
+    ) async throws -> RemoteFileInfo {
         let downloader = ImageDownloader(destination: destination, progress: progress)
         let session = URLSession(configuration: .ephemeral, delegate: downloader, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<RemoteFileInfo, Error>) in
             downloader.continuation = continuation
             session.downloadTask(with: url).resume()
         }
@@ -235,6 +333,9 @@ private final class ImageDownloader: NSObject, URLSessionDownloadDelegate, @unch
             finishError = FlashError.ioFailed("Download failed with HTTP \(response.statusCode)")
             return
         }
+        if let response = downloadTask.response as? HTTPURLResponse {
+            remote = RemoteFileInfo(response: response)
+        }
         do {
             try FileManager.default.moveItem(at: location, to: destination)
         } catch {
@@ -247,7 +348,7 @@ private final class ImageDownloader: NSObject, URLSessionDownloadDelegate, @unch
         if let result {
             continuation?.resume(throwing: result)
         } else {
-            continuation?.resume()
+            continuation?.resume(returning: remote)
         }
         continuation = nil
     }

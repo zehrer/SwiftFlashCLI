@@ -7,19 +7,22 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var knownPhysicalDevices: [KnownPhysicalDevice]
     public var knownFlashMedia: [KnownFlashMedia]
     public var flashHistory: [FlashHistoryEntry]
+    public var trashedDownloads: [TrashedDownload]
 
     public init(
         mediaTypes: [MediaTypeDefinition] = MediaTypeDefinition.preconfiguredDefaults(),
         rememberedImages: [RememberedImage] = [],
         knownPhysicalDevices: [KnownPhysicalDevice] = [],
         knownFlashMedia: [KnownFlashMedia] = [],
-        flashHistory: [FlashHistoryEntry] = []
+        flashHistory: [FlashHistoryEntry] = [],
+        trashedDownloads: [TrashedDownload] = []
     ) {
         self.mediaTypes = mediaTypes
         self.rememberedImages = rememberedImages
         self.knownPhysicalDevices = knownPhysicalDevices
         self.knownFlashMedia = knownFlashMedia
         self.flashHistory = flashHistory
+        self.trashedDownloads = trashedDownloads
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -28,6 +31,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         case knownPhysicalDevices
         case knownFlashMedia
         case flashHistory
+        case trashedDownloads
     }
 
     public init(from decoder: Decoder) throws {
@@ -38,6 +42,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         knownPhysicalDevices = try container.decodeIfPresent([KnownPhysicalDevice].self, forKey: .knownPhysicalDevices) ?? []
         knownFlashMedia = try container.decodeIfPresent([KnownFlashMedia].self, forKey: .knownFlashMedia) ?? []
         flashHistory = try container.decodeIfPresent([FlashHistoryEntry].self, forKey: .flashHistory) ?? []
+        trashedDownloads = try container.decodeIfPresent([TrashedDownload].self, forKey: .trashedDownloads) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -47,6 +52,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         try container.encode(knownPhysicalDevices, forKey: .knownPhysicalDevices)
         try container.encode(knownFlashMedia, forKey: .knownFlashMedia)
         try container.encode(flashHistory, forKey: .flashHistory)
+        try container.encode(trashedDownloads, forKey: .trashedDownloads)
     }
 }
 

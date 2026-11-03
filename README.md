@@ -115,7 +115,9 @@ sudo swiftflash http://192.168.178.120:8080/redox/sdcard-redox.img.xz /dev/diskX
 
 - `.xz` images are unpacked into a temporary directory before flashing; the original `.xz` file is kept.
 - Remote images are downloaded into a temporary directory.
-- All temporary files (download and unpacked image) are deleted again after flashing or verifying, also when the operation fails.
+- After flashing or verifying (also when the operation fails), the downloaded file is moved to the Trash of the user who ran `sudo`, and the unpacked image is deleted.
+- The next time the same URL is used, SwiftFlash asks the server (HEAD request) whether the file is unchanged (`ETag`, or `Last-Modified` plus size). If so, it takes the copy from the Trash instead of downloading again. If the server is not reachable, the copy from the Trash is used.
+- Emptying the Trash simply means the image is downloaded again next time.
 - The remembered image list stores the original location (URL or `.xz` path), so the same source can be selected again later.
 - The temporary directory needs enough free space for the unpacked image.
 
@@ -170,7 +172,7 @@ The implemented flashing flow is:
 10. Write a new `/.uuid` JSON file if a writable mounted partition is available, keeping the `image` block an image may ship in its own `/.uuid` ([format](docs/uuid-file.md)).
 11. If no writable filesystem is available and enough slack remains after the image, write trailer metadata in the last 4 KiB of the device.
 12. Persist image usage, device inventory, and flash history.
-13. Delete temporary downloaded or unpacked image files.
+13. Move a fresh download to the Trash for reuse and delete the other temporary files.
 
 ## Package Layout
 

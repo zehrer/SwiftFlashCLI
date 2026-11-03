@@ -14,7 +14,8 @@ struct SwiftFlashCLI {
                 scanner: DeviceScanner(),
                 deviceManager: DiskArbitrationManager(),
                 prompt: PromptRenderer(),
-                uuidService: UUIDMetadataService()
+                uuidService: UUIDMetadataService(),
+                imagePreparer: ImagePreparer(trashStore: TrashedDownloadStore(configStore: configStore))
             )
         } catch {
             fputs("\(error.localizedDescription)\n", stderr)
@@ -40,8 +41,8 @@ struct SwiftFlashCLI {
                     throw FlashError.requiresRoot
                 }
 
-                let prepared = try await resolveImage(path: imagePath, imageStore: services.imageStore, prompt: services.prompt)
-                defer { cleanup(prepared) }
+                let prepared = try await resolveImage(path: imagePath, services: services)
+                defer { cleanup(prepared, services: services) }
                 let image = prepared.image
                 let device = try resolveDevice(path: devicePath, services: services)
                 if !skipConfirmation
@@ -85,8 +86,8 @@ struct SwiftFlashCLI {
                     throw FlashError.requiresRoot
                 }
 
-                let prepared = try await resolveImage(path: imagePath, imageStore: services.imageStore, prompt: services.prompt)
-                defer { cleanup(prepared) }
+                let prepared = try await resolveImage(path: imagePath, services: services)
+                defer { cleanup(prepared, services: services) }
                 let image = prepared.image
                 let device = try resolveDevice(path: devicePath, services: services)
                 let verifyProgress = ConsoleProgressRenderer(label: "Verify", totalBytes: image.size)
@@ -236,24 +237,35 @@ struct SwiftFlashCLI {
         }
     }
 
-    private static func resolveImage(
-        path: String?,
-        imageStore: ImageCatalogStore,
-        prompt: PromptRenderer
-    ) async throws -> PreparedImage {
-        let resolvedPath = try path ?? prompt.selectImage(from: imageStore.allImages())
+    private static func resolveImage(path: String?, services: Services) async throws -> PreparedImage {
+        let resolvedPath = try path ?? services.prompt.selectImage(from: services.imageStore.allImages())
         let progress = PreparationProgress()
-        let prepared = try await ImagePreparer().prepare(source: resolvedPath) { update in
+        let prepared = try await services.imagePreparer.prepare(source: resolvedPath) { update in
             progress.update(update)
         }
         progress.finish()
+        if let reuse = prepared.trashReuse {
+            let downloadedAt = reuse.download.downloadedAt.formatted(date: .abbreviated, time: .shortened)
+            if reuse.verifiedWithServer {
+                print("Using unchanged download from Trash (downloaded \(downloadedAt))")
+            } else {
+                print("Server not reachable, using download from Trash (downloaded \(downloadedAt))")
+            }
+        }
         return prepared
     }
 
-    private static func cleanup(_ prepared: PreparedImage) {
-        guard prepared.hasTemporaryFiles else { return }
-        prepared.cleanup()
-        print("Removed temporary image files")
+    private static func cleanup(_ prepared: PreparedImage, services: Services) {
+        switch services.imagePreparer.finish(prepared) {
+        case .nothingToDo:
+            break
+        case .removedTemporaryFiles:
+            print("Removed temporary image files")
+        case .movedDownloadToTrash(let url):
+            print("Moved downloaded image to Trash for reuse: \(url.path)")
+        case .trashFailed(let reason):
+            print("Removed temporary image files (could not move download to Trash: \(reason))")
+        }
     }
 
     /// Shows one progress bar per preparation step (download, unpack) with the bytes downloaded or unpacked so far.
@@ -420,6 +432,7 @@ struct SwiftFlashCLI {
         let deviceManager: DiskArbitrationManager
         let prompt: PromptRenderer
         let uuidService: UUIDMetadataService
+        let imagePreparer: ImagePreparer
 
         var flashService: FlashService {
             FlashService(
