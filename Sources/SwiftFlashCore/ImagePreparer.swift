@@ -25,6 +25,8 @@ public struct KeptDownload: Equatable, Sendable {
     public var file: URL
     public var sourceURL: String
     public var remote: RemoteFileInfo
+    /// SHA-256 of the downloaded file, kept so a later copy from the Trash can be checked offline.
+    public var sha256: String
 }
 
 /// How a remote image was obtained from an earlier download in the Trash.
@@ -48,17 +50,21 @@ public struct PreparedImage: Equatable, Sendable {
     public var temporaryDirectory: URL?
     public var keptDownload: KeptDownload?
     public var trashReuse: TrashReuse?
+    /// True if the image file (as downloaded or found, before unpacking) matched a published `.sha256`.
+    public var checksumVerified: Bool
 
     public init(
         image: ImageDescriptor,
         temporaryDirectory: URL?,
         keptDownload: KeptDownload? = nil,
-        trashReuse: TrashReuse? = nil
+        trashReuse: TrashReuse? = nil,
+        checksumVerified: Bool = false
     ) {
         self.image = image
         self.temporaryDirectory = temporaryDirectory
         self.keptDownload = keptDownload
         self.trashReuse = trashReuse
+        self.checksumVerified = checksumVerified
     }
 
     public var hasTemporaryFiles: Bool {
@@ -99,6 +105,7 @@ public final class ImagePreparer {
         var temporaryDirectory: URL?
         var keptDownload: KeptDownload?
         var trashReuse: TrashReuse?
+        var checksumVerified = false
         do {
             var localURL: URL
             let sourceLocation: String
@@ -111,16 +118,41 @@ public final class ImagePreparer {
                 let directory = try Self.makeTemporaryDirectory()
                 temporaryDirectory = directory
                 localURL = directory.appendingPathComponent(remoteURL.lastPathComponent)
+                let sidecar = await ChecksumSidecar.fetch(for: remoteURL)
+
                 if let reuse = await reusableTrashedDownload(for: source, remoteURL: remoteURL),
                    let trashedFile = reuse.download.availableFile {
                     try FileManager.default.copyItem(at: trashedFile, to: localURL)
-                    trashReuse = reuse
-                } else {
+                    // Offline, fall back to the checksum computed when the file was downloaded.
+                    let expected = sidecar.hash ?? (sidecar == .unreachable ? reuse.download.sha256 : nil)
+                    if let expected {
+                        if try ImageSupport.calculateSHA256(for: localURL) == expected {
+                            trashReuse = reuse
+                            checksumVerified = sidecar.hash != nil
+                        } else {
+                            // Damaged or outdated copy in the Trash: download again instead.
+                            try FileManager.default.removeItem(at: localURL)
+                        }
+                    } else {
+                        trashReuse = reuse
+                    }
+                }
+
+                if trashReuse == nil {
                     let remote = try await ImageDownloader.download(from: remoteURL, to: localURL) { completed, total in
                         progress(ImagePreparationProgress(step: .download, fraction: Double(completed) / Double(total), processedBytes: completed))
                     }
+                    let sha256 = try ImageSupport.calculateSHA256(for: localURL)
+                    if let expected = sidecar.hash {
+                        guard sha256 == expected else {
+                            throw FlashError.invalidImage(
+                                "Checksum mismatch for \(remoteURL.lastPathComponent): expected \(expected), got \(sha256)"
+                            )
+                        }
+                        checksumVerified = true
+                    }
                     if trashStore != nil {
-                        keptDownload = KeptDownload(file: localURL, sourceURL: source, remote: remote)
+                        keptDownload = KeptDownload(file: localURL, sourceURL: source, remote: remote, sha256: sha256)
                     }
                 }
                 sourceLocation = source
@@ -130,6 +162,15 @@ public final class ImagePreparer {
                     throw FlashError.imageNotFound(localURL.path)
                 }
                 try ImageSupport.validateImageName(localURL.lastPathComponent)
+                if let expected = ChecksumSidecar.read(forLocalFile: localURL).hash {
+                    let sha256 = try ImageSupport.calculateSHA256(for: localURL)
+                    guard sha256 == expected else {
+                        throw FlashError.invalidImage(
+                            "Checksum mismatch for \(localURL.lastPathComponent): expected \(expected), got \(sha256)"
+                        )
+                    }
+                    checksumVerified = true
+                }
                 sourceLocation = localURL.path
             }
 
@@ -154,7 +195,8 @@ public final class ImagePreparer {
                 image: image,
                 temporaryDirectory: temporaryDirectory,
                 keptDownload: keptDownload,
-                trashReuse: trashReuse
+                trashReuse: trashReuse,
+                checksumVerified: checksumVerified
             )
         } catch {
             if let temporaryDirectory {
@@ -184,7 +226,8 @@ public final class ImagePreparer {
                     trashPath: trashed.path,
                     size: size,
                     remote: kept.remote,
-                    downloadedAt: Date()
+                    downloadedAt: Date(),
+                    sha256: kept.sha256
                 )
             )
             return .movedDownloadToTrash(trashed)

@@ -43,13 +43,23 @@ public struct TrashedDownload: Codable, Equatable, Sendable {
     public var size: Int64
     public var remote: RemoteFileInfo
     public var downloadedAt: Date
+    /// SHA-256 of the file at download time.
+    public var sha256: String?
 
-    public init(sourceURL: String, trashPath: String, size: Int64, remote: RemoteFileInfo, downloadedAt: Date) {
+    public init(
+        sourceURL: String,
+        trashPath: String,
+        size: Int64,
+        remote: RemoteFileInfo,
+        downloadedAt: Date,
+        sha256: String? = nil
+    ) {
         self.sourceURL = sourceURL
         self.trashPath = trashPath
         self.size = size
         self.remote = remote
         self.downloadedAt = downloadedAt
+        self.sha256 = sha256
     }
 
     /// True if the server still serves the same file. Prefers ETag, then Last-Modified, and always checks the size.

@@ -90,6 +90,7 @@ struct DownloadTrashTests {
     }
 
     /// Full round trip against a real server: set SWIFTFLASH_TEST_IMAGE_URL (see ImagePreparerTests).
+    /// Set SWIFTFLASH_TEST_IMAGE_HAS_SHA256 if the server publishes `<image>.sha256` next to the image.
     @Test(.enabled(if: ProcessInfo.processInfo.environment["SWIFTFLASH_TEST_IMAGE_URL"] != nil))
     func remoteDownloadGoesToTrashAndIsReused() async throws {
         let source = try #require(ProcessInfo.processInfo.environment["SWIFTFLASH_TEST_IMAGE_URL"])
@@ -106,6 +107,8 @@ struct DownloadTrashTests {
 
         let first = try await preparer.prepare(source: source) { _ in }
         #expect(first.trashReuse == nil)
+        let expectSidecar = ProcessInfo.processInfo.environment["SWIFTFLASH_TEST_IMAGE_HAS_SHA256"] != nil
+        #expect(first.checksumVerified == expectSidecar)
         guard case .movedDownloadToTrash(let trashed) = preparer.finish(first) else {
             Issue.record("Download was not moved to the Trash")
             return
@@ -114,6 +117,7 @@ struct DownloadTrashTests {
 
         let second = try await preparer.prepare(source: source) { _ in }
         #expect(second.trashReuse?.verifiedWithServer == true)
+        #expect(second.checksumVerified == expectSidecar)
         #expect(second.image.size == first.image.size)
         #expect(preparer.finish(second) == .removedTemporaryFiles)
         #expect(FileManager.default.fileExists(atPath: trashed.path))

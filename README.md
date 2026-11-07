@@ -118,6 +118,8 @@ sudo swiftflash http://192.168.178.120:8080/redox/sdcard-redox.img.xz /dev/diskX
 - After flashing or verifying (also when the operation fails), the downloaded file is moved to the Trash of the user who ran `sudo`, and the unpacked image is deleted.
 - The next time the same URL is used, SwiftFlash asks the server (HEAD request) whether the file is unchanged (`ETag`, or `Last-Modified` plus size). If so, it takes the copy from the Trash instead of downloading again. If the server is not reachable, the copy from the Trash is used.
 - Emptying the Trash simply means the image is downloaded again next time.
+- If a `<image>.sha256` file (`sha256sum` format) is published next to the image, SwiftFlash checks the downloaded file against it and stops on a mismatch. A copy from the Trash is checked too; if it does not match, the image is downloaded again. When the server is offline, the copy is checked against the SHA-256 recorded at download time.
+- The same works for local files: `image.img.xz` is checked if `image.img.xz.sha256` lies next to it.
 - The remembered image list stores the original location (URL or `.xz` path), so the same source can be selected again later.
 - The temporary directory needs enough free space for the unpacked image.
 

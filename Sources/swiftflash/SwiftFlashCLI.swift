@@ -244,6 +244,9 @@ struct SwiftFlashCLI {
             progress.update(update)
         }
         progress.finish()
+        if prepared.checksumVerified {
+            print("Checksum verified (SHA-256 from .sha256)")
+        }
         if let reuse = prepared.trashReuse {
             let downloadedAt = reuse.download.downloadedAt.formatted(date: .abbreviated, time: .shortened)
             if reuse.verifiedWithServer {
