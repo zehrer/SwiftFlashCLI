@@ -37,6 +37,15 @@ Release overview and planned follow-up work:
 - Swift 6.2 toolchain via Xcode
 - `sudo` for actual flashing operations
 
+## Install
+
+With Homebrew (once the tap is published):
+
+```bash
+brew install zehrer/tap/swiftflash
+swiftflash --version
+```
+
 ## Build
 
 ```bash
@@ -103,6 +112,7 @@ swiftflash media name <device-uuid> <name>
 swiftflash media clear-name <device-uuid>
 swiftflash history
 swiftflash history clear
+swiftflash version
 sudo swiftflash verify /path/to/image.iso /dev/diskX
 ```
 
@@ -176,6 +186,17 @@ The implemented flashing flow is:
 12. Persist image usage, device inventory, and flash history.
 13. Unmount all partitions of the medium so it can be removed safely (also after `verify`).
 14. Move a fresh download to the Trash for reuse and delete the other temporary files.
+
+## Releasing
+
+```bash
+scripts/release.sh 0.2.0
+```
+
+The script checks that `Sources/SwiftFlashCore/Version.swift` matches, requires a clean working tree, runs the tests,
+builds an arm64 release binary, and writes `dist/swiftflash-<version>-macos-arm64.tar.gz` plus a ready Homebrew
+formula `dist/swiftflash.rb` (from `packaging/homebrew/swiftflash.rb.template`). It prints the tag, GitHub release and
+tap steps but does not run them.
 
 ## Package Layout
 

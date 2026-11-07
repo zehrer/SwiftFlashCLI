@@ -677,6 +677,7 @@ public enum FlashCommand: Equatable, Sendable {
     case mediaClearName(id: String)
     case history
     case historyClear
+    case version
     case help
 }
 

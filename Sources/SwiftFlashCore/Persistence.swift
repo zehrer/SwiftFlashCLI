@@ -3,10 +3,13 @@ import Foundation
 
 public final class AppConfigStore {
     public let configURL: URL
+    /// Owner to give the config directory and file after saving, e.g. the user who ran `sudo`.
+    private let owner: ConfigFileOwner?
     private var config: AppConfig
 
-    public init(configURL: URL? = nil) throws {
+    public init(configURL: URL? = nil, owner: ConfigFileOwner? = ConfigFileOwner.sudoInvoker()) throws {
         self.configURL = try configURL ?? ConfigPathResolver.defaultConfigURL()
+        self.owner = owner
         self.config = try Self.loadConfig(from: self.configURL)
     }
 
@@ -23,7 +26,19 @@ public final class AppConfigStore {
         let directory = configURL.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try JSONCoding.encoder.encode(config)
-        try data.write(to: configURL, options: .atomic)
+        do {
+            try data.write(to: configURL, options: .atomic)
+        } catch CocoaError.fileWriteNoPermission {
+            throw FlashError.persistenceFailed(
+                "No permission to write \(configURL.path). It is probably owned by root from an older version; "
+                    + "run `sudo swiftflash history` once to fix the ownership."
+            )
+        }
+        if let owner {
+            // Under sudo the file is written by root; hand it back so later commands without sudo can update it.
+            _ = chown(directory.path, owner.uid, owner.gid)
+            _ = chown(configURL.path, owner.uid, owner.gid)
+        }
     }
 
     private static func loadConfig(from url: URL) throws -> AppConfig {
@@ -32,6 +47,31 @@ public final class AppConfigStore {
         }
         let data = try Data(contentsOf: url)
         return try JSONCoding.decoder.decode(AppConfig.self, from: data)
+    }
+}
+
+public struct ConfigFileOwner: Equatable, Sendable {
+    public var uid: uid_t
+    public var gid: gid_t
+
+    public init(uid: uid_t, gid: gid_t) {
+        self.uid = uid
+        self.gid = gid
+    }
+
+    /// The user who started the tool via `sudo`, or nil when not running as root through sudo.
+    public static func sudoInvoker(
+        env: [String: String] = ProcessInfo.processInfo.environment,
+        effectiveUserID: uid_t = geteuid()
+    ) -> ConfigFileOwner? {
+        guard effectiveUserID == 0,
+              let uid = env["SUDO_UID"].flatMap({ uid_t($0) }),
+              let gid = env["SUDO_GID"].flatMap({ gid_t($0) }),
+              uid != 0
+        else {
+            return nil
+        }
+        return ConfigFileOwner(uid: uid, gid: gid)
     }
 }
 

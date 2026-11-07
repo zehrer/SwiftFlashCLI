@@ -1,0 +1,26 @@
+class Swiftflash < Formula
+  desc "Flash .img/.iso images (also .xz and http URLs) to SD cards and USB sticks"
+  homepage "https://github.com/zehrer/SwiftFlashCLI"
+  url "https://github.com/zehrer/SwiftFlashCLI/releases/download/v@VERSION@/swiftflash-@VERSION@-macos-arm64.tar.gz"
+  sha256 "@SHA256@"
+  license "MIT"
+
+  depends_on arch: :arm64
+  depends_on macos: :ventura
+
+  def install
+    bin.install "swiftflash"
+  end
+
+  def caveats
+    <<~EOS
+      Flashing and verifying need root privileges:
+        sudo swiftflash [image_file_or_url] [/dev/diskX]
+    EOS
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/swiftflash --version")
+    assert_match "SwiftFlashCLI", shell_output("#{bin}/swiftflash help")
+  end
+end

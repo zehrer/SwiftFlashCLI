@@ -206,6 +206,9 @@ struct SwiftFlashCLI {
                 try services.historyStore.clear()
                 print("Cleared flash history")
 
+            case .version:
+                print("swiftflash \(SwiftFlashVersion.current)")
+
             case .help:
                 print(HelpRenderer.text)
         }

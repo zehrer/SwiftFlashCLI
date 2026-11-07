@@ -27,17 +27,39 @@ Included requirements:
 
 Known gaps:
 - real hardware validation is still limited
-- no explicit release/version command yet
+- no explicit release/version command yet (added in 0.2.0)
 - no full config cleanup/reset command yet
 - no editing of custom user-defined device fields from the CLI yet
 
-## Later Releases 
+## Release 0.2.0
+
+status: ready to tag (first Homebrew release)
+
+Included requirements:
+- `.xz` compressed images (unpacked via the `Compression` framework)
+- remote `http(s)` images, downloaded to a temporary directory
+- downloaded images are moved to the user's Trash and reused while the server reports the same file
+- verification against a published `<image>.sha256` (remote and local)
+- `swiftflash images remove <name-or-path>` and `swiftflash images clear`
+- image-provided `image` block in `/.uuid` is kept and shown (see `docs/uuid-file.md`)
+- device selection and erase confirmation show what is currently on a known medium
+- medium is unmounted after flash and verify
+- `swiftflash version` / `--version`
+- config file is handed back to the invoking user when running via `sudo`
+- `scripts/release.sh` builds the release archive and the Homebrew formula
+
+Known gaps:
+- real hardware validation is still limited
+- `.gz` images are not supported yet
+- release builds are arm64 only
+
+## Later Releases
 Planned requirements:
-- `swiftflash version`
+- Homebrew tap `zehrer/homebrew-tap` with automated formula updates
+- `.gz` image support
 
 
 Potenial requirements:
-- `swiftflash version`
 - `swiftflash reset` or targeted cleanup commands for images, devices, and config
 - CLI commands to edit user-defined device fields
 - improved device listing and formatting for multiple similar readers/cards
@@ -47,4 +69,5 @@ Potenial requirements:
 - import/export or migration support for shared GUI/CLI config handling
 - extended verification modes
 - improved real-device compatibility testing across USB sticks, SD cards, and card readers
-- packaging/distribution strategy for end users
+- GitHub Actions release workflow
+- universal (arm64 + x86_64) release builds

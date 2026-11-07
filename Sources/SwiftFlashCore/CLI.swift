@@ -22,6 +22,8 @@ public enum CLIParser {
             return try parseLegacyDevicesArguments(Array(args.dropFirst()))
         case "history":
             return try parseHistoryArguments(Array(args.dropFirst()))
+        case "version", "--version":
+            return .version
         case "help", "--help", "-h":
             return .help
         default:
@@ -307,6 +309,10 @@ public struct HelpRenderer {
     Set or clear a custom name for a remembered medium:
       swiftflash media name <device-uuid> <name>
       swiftflash media clear-name <device-uuid>
+
+    Show the version:
+      swiftflash version
+      swiftflash --version
 
     Show flash history:
       swiftflash history

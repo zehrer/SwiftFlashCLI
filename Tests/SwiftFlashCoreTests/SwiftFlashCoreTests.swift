@@ -182,6 +182,56 @@ struct SwiftFlashCoreTests {
     }
 
     @Test
+    func parsesVersionCommand() throws {
+        #expect(try CLIParser.parse(arguments: ["swiftflash", "version"]) == .version)
+        #expect(try CLIParser.parse(arguments: ["swiftflash", "--version"]) == .version)
+        #expect(SwiftFlashVersion.current.split(separator: ".").count == 3)
+    }
+
+    @Test
+    func sudoInvokerIsOnlyUsedWhenRunningAsRootViaSudo() {
+        let env = ["SUDO_UID": "501", "SUDO_GID": "20"]
+        #expect(ConfigFileOwner.sudoInvoker(env: env, effectiveUserID: 0) == ConfigFileOwner(uid: 501, gid: 20))
+        #expect(ConfigFileOwner.sudoInvoker(env: env, effectiveUserID: 501) == nil)
+        #expect(ConfigFileOwner.sudoInvoker(env: [:], effectiveUserID: 0) == nil)
+        #expect(ConfigFileOwner.sudoInvoker(env: ["SUDO_UID": "0", "SUDO_GID": "0"], effectiveUserID: 0) == nil)
+    }
+
+    @Test
+    func configIsHandedToOwnerAfterSaving() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let configURL = directory.appendingPathComponent("config.json")
+        let owner = ConfigFileOwner(uid: getuid(), gid: getgid())
+        let store = try AppConfigStore(configURL: configURL, owner: owner)
+
+        try store.save()
+
+        let attributes = try FileManager.default.attributesOfItem(atPath: configURL.path)
+        #expect((attributes[.ownerAccountID] as? NSNumber)?.uint32Value == owner.uid)
+        #expect((attributes[.groupOwnerAccountID] as? NSNumber)?.uint32Value == owner.gid)
+    }
+
+    @Test
+    func unwritableConfigExplainsHowToFixIt() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            _ = chmod(directory.path, 0o755)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let store = try AppConfigStore(configURL: directory.appendingPathComponent("config.json"), owner: nil)
+        #expect(chmod(directory.path, 0o555) == 0)
+
+        #expect {
+            try store.save()
+        } throws: { error in
+            guard case FlashError.persistenceFailed(let message) = error else { return false }
+            return message.contains("sudo swiftflash")
+        }
+    }
+
+    @Test
     func parsesImagesSubcommands() throws {
         #expect(try CLIParser.parse(arguments: ["swiftflash", "images"]) == .images)
         #expect(try CLIParser.parse(arguments: ["swiftflash", "images", "clear"]) == .imagesClear)
