@@ -17,6 +17,21 @@ swiftflash --version
 
 The Homebrew build runs on Apple Silicon Macs with macOS 13 or later. See [Build](#build) to build it yourself.
 
+### Small footprint
+
+SwiftFlash is a single native binary without bundled runtimes or dependencies (measured for 0.2.0):
+
+| | Size |
+| --- | --- |
+| Download (`.tar.gz`) | 390 KB |
+| Installed (`/opt/homebrew/Cellar/swiftflash`) | 1.2 MB |
+| Memory, typical command | ~3 MB (peak footprint) |
+| Memory, browsing a build server | ~13 MB (peak footprint) |
+
+Flashing and verifying use fixed 4 MiB buffers, so memory use does not grow with the image size. Unpacking
+`.xz` additionally needs the archive's dictionary (up to 64 MiB for `xz -9`). For comparison, GUI flashing tools
+that bundle a browser runtime (Electron) usually need well over 100 MB of disk space.
+
 ## Quick start
 
 ```bash
