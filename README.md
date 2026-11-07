@@ -1,141 +1,112 @@
 # SwiftFlashCLI
 
-`SwiftFlashCLI` is a macOS command-line tool for flashing image files such as `.iso` and `.img` to external physical drives.
-Images can also be `.xz` compressed (e.g. `.img.xz`) and can be loaded from an `http(s)` URL.
+`swiftflash` is a macOS command-line tool for flashing `.img` and `.iso` images to SD cards and USB sticks.
+Images can be local files, `.xz` compressed, or loaded from an `http(s)` URL or a registered build server.
 
-It is implemented 100% in Swift and uses only system frameworks and APIs:
-- `Foundation`
-- `DiskArbitration`
-- `IOKit`
-- `Darwin` / POSIX I/O
-- `CryptoKit`
-- `Compression` (xz decoding)
-
-No dependency on `diskutil`, `dd`, `xz`, `curl`, or other external tools is used for scanning, mounting, unmounting, downloading, unpacking, or writing.
-
-## Status
-
-The current version provides:
-- interactive or argument-based flashing
-- remembered image history
-- remembered device UUID inventory
-- configurable media types with preconfigured defaults
-- flash history persistence
-- best-effort `.uuid` metadata read/write on flashed media, including an image-provided `image` block (see [docs/uuid-file.md](docs/uuid-file.md))
-- optional post-flash verification
-- raw end-of-device trailer metadata when there is enough safe unused space
-- a reusable `SwiftFlashCore` library target for later GUI integration
-
-The code compiles and the automated tests pass. Real hardware flashing should still be treated as the next validation step.
-
-Release overview and planned follow-up work:
-- [RELEASE.md](RELEASE.md)
-
-## Requirements
-
-- macOS 13 or later
-- Swift 6.2 toolchain via Xcode
-- `sudo` for actual flashing operations
+It is implemented 100% in Swift and uses only system frameworks:
+`Foundation`, `DiskArbitration`, `IOKit`, `Darwin` / POSIX I/O, `CryptoKit` and `Compression`.
+No external tools such as `diskutil`, `dd`, `xz` or `curl` are used for scanning, mounting, downloading,
+unpacking or writing.
 
 ## Install
-
-With Homebrew (once the tap is published):
 
 ```bash
 brew install zehrer/tap/swiftflash
 swiftflash --version
 ```
 
-## Build
+The Homebrew build runs on Apple Silicon Macs with macOS 13 or later. See [Build](#build) to build it yourself.
+
+## Quick start
 
 ```bash
-xcrun swift build
+swiftflash media list                                      # connected SD cards / USB sticks
+sudo swiftflash ~/Downloads/image.img.xz /dev/disk6        # flash a local (compressed) image
+sudo swiftflash https://example.com/images/os.img.xz       # flash a remote image
+sudo swiftflash                                            # choose image and device interactively
 ```
 
-Run tests:
+Flashing and verifying need `sudo`. Only external physical whole disks are offered as targets, and unless
+`--yes` is given, SwiftFlash shows what is currently on the medium and asks before erasing it.
 
-```bash
-xcrun swift test
-```
+## Features
 
-Run the CLI:
-
-```bash
-./.build/debug/swiftflash help
-```
-
-Run without arguments to start the interactive shell:
-
-```bash
-./.build/debug/swiftflash
-```
+- Flash `.img` / `.iso`, also `.xz` compressed, from a local path or an `http(s)` URL
+- Image sources: register a build server directory once, then flash the newest build with `redox:<family>`
+- Downloads are checked against a published `<image>.sha256` and kept in the Trash for reuse
+- Optional verification of the written medium against the image
+- Device selection and erase confirmation show the known name, media type and the image currently on the medium
+- Identification of media and flashed images via a small `/.uuid` file ([format](docs/uuid-file.md)), with a raw
+  trailer copy at the end of the device when there is room
+- Remembered images, media inventory with names and media types, and flash history
+- The medium is unmounted after flashing, so it can be removed right away
+- Interactive shell when started without arguments
+- Reusable `SwiftFlashCore` library target for a future GUI
 
 ## Usage
 
-Main command:
-
 ```bash
-sudo swiftflash [image_file] [/dev/diskX]
+sudo swiftflash [image] [/dev/diskX]
+sudo swiftflash flash [image] [/dev/diskX] [--yes]
+sudo swiftflash verify [image] [/dev/diskX]
 ```
 
-Interactive shell:
+`image` can be a local path, an `http(s)` URL, or `<source>:<family>` (see [Image sources](#image-sources)).
+Without arguments, `swiftflash` starts an interactive shell; type commands like `flash`, `media list` or
+`history`, and leave it with `exit` or `quit`.
+
+All commands (`swiftflash help` shows the same list):
 
 ```bash
-swiftflash
-```
-
-Inside the shell, type commands like `flash`, `media list`, or `history`.
-Leave the shell with `exit`, `quit`, or `quite`.
-
-Explicit subcommand form:
-
-```bash
-sudo swiftflash flash [image_file] [/dev/diskX] [--yes]
-```
-
-Additional commands:
-
-```bash
-swiftflash images
+swiftflash images                                 # remembered images
 swiftflash images remove <name-or-path>
 swiftflash images clear
-swiftflash media list
-swiftflash media known
+
+swiftflash source add <name> <url>                # image sources (build server directories)
+swiftflash source list
+swiftflash source browse <name> [family]
+swiftflash source remove <name>
+
+swiftflash media list                             # connected eligible media
+swiftflash media known                            # remembered media
 swiftflash media info <name-or-device-uuid>
-swiftflash media identify
-swiftflash identify
+swiftflash media identify                         # create a device-uuid on new writable media
 swiftflash media types
 swiftflash media type-add <type-name>
 swiftflash media set-type <device-uuid> <type-name>
 swiftflash media clear-type <device-uuid>
 swiftflash media name <device-uuid> <name>
 swiftflash media clear-name <device-uuid>
+
 swiftflash history
 swiftflash history clear
 swiftflash version
-sudo swiftflash verify /path/to/image.iso /dev/diskX
 ```
+
+Legacy `swiftflash devices …` commands are still accepted as aliases.
 
 ### Compressed and remote images
 
 ```bash
 sudo swiftflash /path/to/sdcard.img.xz /dev/diskX
-sudo swiftflash http://192.168.178.120:8080/redox/sdcard-redox.img.xz /dev/diskX
+sudo swiftflash https://example.com/images/sdcard.img.xz /dev/diskX
 ```
 
-- `.xz` images are unpacked into a temporary directory before flashing; the original `.xz` file is kept.
-- Remote images are downloaded into a temporary directory.
-- After flashing or verifying (also when the operation fails), the downloaded file is moved to the Trash of the user who ran `sudo`, and the unpacked image is deleted.
-- The next time the same URL is used, SwiftFlash asks the server (HEAD request) whether the file is unchanged (`ETag`, or `Last-Modified` plus size). If so, it takes the copy from the Trash instead of downloading again. If the server is not reachable, the copy from the Trash is used.
-- Emptying the Trash simply means the image is downloaded again next time.
-- If a `<image>.sha256` file (`sha256sum` format) is published next to the image, SwiftFlash checks the downloaded file against it and stops on a mismatch. A copy from the Trash is checked too; if it does not match, the image is downloaded again. When the server is offline, the copy is checked against the SHA-256 recorded at download time.
-- The same works for local files: `image.img.xz` is checked if `image.img.xz.sha256` lies next to it.
-- The remembered image list stores the original location (URL or `.xz` path), so the same source can be selected again later.
-- The temporary directory needs enough free space for the unpacked image.
+- `.xz` images are unpacked into a temporary directory; the original `.xz` file is kept. The temporary directory
+  needs enough free space for the unpacked image.
+- Remote images are downloaded into a temporary directory. After flashing or verifying (also when it fails),
+  the downloaded file is moved to the Trash of the user who ran `sudo`, and the unpacked image is deleted.
+- The next time the same URL is used, SwiftFlash asks the server whether the file is unchanged (`ETag`, or
+  `Last-Modified` plus size) and takes the copy from the Trash instead of downloading again. If the server is not
+  reachable, the copy from the Trash is used. An emptied Trash just means the image is downloaded again.
+- If a `<image>.sha256` file (`sha256sum` format) lies next to the image, the download is checked against it and
+  SwiftFlash stops on a mismatch. A copy from the Trash is checked too and downloaded again if it does not match;
+  offline, it is checked against the SHA-256 recorded at download time. Local files are checked the same way.
+- The remembered image list stores the original location (URL or `.xz` path), not the temporary file.
 
 ### Image sources
 
-A build server directory can be registered once and then used by short names:
+Register a build server directory once and use short names:
 
 ```bash
 swiftflash source add redox http://homenodellm:8080/sdcard/
@@ -145,94 +116,114 @@ sudo swiftflash redox:t18-direct            # flash the newest build of that fam
 sudo swiftflash redox:                      # choose family and build interactively
 ```
 
-- The family can be given in full (`redox-rpi-t18-direct`), as a suffix (`t18-direct`) or as a unique part (`t18`).
+- The family can be given in full (`redox-rpi-t18-direct`), as a suffix (`t18-direct`) or as a unique part
+  (`t18`). An ambiguous short form is rejected with the list of matching families.
 - The interactive image selection also offers `redox) Browse …`.
 - SwiftFlash reads `index.json` if the server has one, otherwise the directory listing plus `Last-Modified`.
-- What a build server should provide is described in [docs/build-server.md](docs/build-server.md); hand it to the team running the server.
+- What a build server should provide is described in [docs/build-server.md](docs/build-server.md).
 
 ### Interactive behavior
 
-- If no image is provided, the tool shows remembered images and allows entering a new path.
-- If no device is provided, the tool scans for external physical whole disks and offers an interactive selection.
-- If exactly one eligible device is found, that device is proposed directly.
-- If no command is provided, the tool starts an interactive REPL-style shell.
-- `swiftflash media identify` can create a `device-uuid` marker on a writable new medium so later scans can reuse it.
-- Unless `--yes` is used, the flash flow asks for final destructive confirmation.
+- Without an image, SwiftFlash lists remembered images and configured sources, and accepts a new path or URL.
+- Without a device, it scans for external physical whole disks; a single eligible device is proposed directly.
+- For each device it shows whether the medium is known (name, media type, `device-uuid`) and what is on it
+  (image version, file and flash date), or the volume names of an unknown medium.
+- Unless `--yes` is used, the flash flow asks for a final confirmation and says what will be replaced.
+- After writing, it asks whether to verify the medium before metadata is written.
 
 ## Persistence
 
-The CLI stores its shared config at:
+Configuration, inventory and history are stored in:
 
 ```text
 ~/.swiftflash/config.json
 ```
 
-When run under `sudo`, the tool resolves this path against the invoking user so config is still written to the user account rather than root.
+Under `sudo`, the path is resolved against the invoking user, and the file is handed back to that user after
+saving, so later commands without `sudo` can still update it.
 
-The persisted schema contains:
-- `mediaTypes`
+The file contains:
+- `mediaTypes` — starts with `USB Stick`, `SD Card`, `Micro SD Card`
 - `rememberedImages`
-- `knownPhysicalDevices`
+- `knownPhysicalDevices` — tool-managed device UUIDs plus user-meaningful metadata (no reader vendor/model labels)
 - `knownFlashMedia`
 - `flashHistory`
+- `trashedDownloads` — downloads kept in the Trash for reuse
+- `imageSources`
 
-`knownPhysicalDevices` is intentionally minimal and keeps only tool-managed device UUIDs plus user-meaningful metadata. It does not persist reader-derived vendor/model labels.
+The layout is intended to stay compatible with a future SwiftFlash GUI.
 
-`mediaTypes` are regular config data, not a hard-coded enum. A fresh config starts with:
-- `USB Stick`
-- `SD Card`
-- `Micro SD Card`
+## Flash flow
 
-This layout is intended to stay compatible with future integration into the SwiftFlash GUI project.
+1. Resolve `<source>:<family>`, download remote images, check them against `.sha256`, and unpack `.xz` into a
+   temporary directory; validate the image file and size.
+2. Scan only eligible external physical whole-disk devices and show what is on them.
+3. Read an existing `/.uuid` from mounted partitions (or the trailer) to reuse the `device-uuid`.
+4. Unmount the whole disk through Disk Arbitration.
+5. Write the image to the raw device node with POSIX I/O, showing progress and speed.
+6. Optionally verify the raw device contents against the image.
+7. Flush data with `fsync` and `F_FULLFSYNC`.
+8. Remount the partitions.
+9. Write `/.uuid` on a writable partition, keeping an `image` block the image may ship in its own `/.uuid`.
+10. If at least 1 MiB is free after the image, also write the metadata into the last 4 KiB of the device.
+11. Persist image usage, device inventory and flash history.
+12. Unmount the medium so it can be removed (also after `verify`).
+13. Move a fresh download to the Trash and delete the other temporary files.
 
-## Flash Flow
+## Build
 
-The implemented flashing flow is:
+Requires Xcode with Swift 6.2 or later.
 
-1. Download remote images and unpack `.xz` images into a temporary directory, then validate the image file and size.
-2. Scan only eligible external physical whole-disk devices.
-3. Read an existing `/.uuid` file from mounted partitions if available.
-4. Unmount the selected disk through Disk Arbitration.
-5. Write the image directly to the raw device node using POSIX I/O in Swift.
-6. Show a single-line progress bar with transfer speed.
-7. Optionally verify the raw device contents against the source image before metadata is written.
-8. Flush data with `fsync` and `F_FULLFSYNC` where available.
-9. Attempt to remount writable partitions.
-10. Write a new `/.uuid` JSON file if a writable mounted partition is available, keeping the `image` block an image may ship in its own `/.uuid` ([format](docs/uuid-file.md)).
-11. If no writable filesystem is available and enough slack remains after the image, write trailer metadata in the last 4 KiB of the device.
-12. Persist image usage, device inventory, and flash history.
-13. Unmount all partitions of the medium so it can be removed safely (also after `verify`).
-14. Move a fresh download to the Trash for reuse and delete the other temporary files.
+```bash
+xcrun swift build
+xcrun swift test
+./.build/debug/swiftflash help
+```
 
 ## Releasing
 
-```bash
-scripts/release.sh 0.2.0
-```
+1. Bump `Sources/SwiftFlashCore/Version.swift`, update [RELEASE.md](RELEASE.md), commit and push.
+2. Build the archive and the formula:
+   ```bash
+   scripts/release.sh 0.2.0
+   ```
+   The script checks the version and a clean working tree, runs the tests, builds an arm64 release binary, and
+   writes `dist/swiftflash-<version>-macos-arm64.tar.gz` plus `dist/swiftflash.rb`
+   (from `packaging/homebrew/swiftflash.rb.template`).
+3. Tag and publish (the script prints these commands):
+   ```bash
+   git tag v0.2.0 && git push origin v0.2.0
+   gh release create v0.2.0 dist/swiftflash-0.2.0-macos-arm64.tar.gz --title v0.2.0
+   ```
+4. Copy `dist/swiftflash.rb` to `Formula/swiftflash.rb` in [zehrer/homebrew-tap](https://github.com/zehrer/homebrew-tap)
+   and push it; `brew upgrade` then offers the new version.
 
-The script checks that `Sources/SwiftFlashCore/Version.swift` matches, requires a clean working tree, runs the tests,
-builds an arm64 release binary, and writes `dist/swiftflash-<version>-macos-arm64.tar.gz` plus a ready Homebrew
-formula `dist/swiftflash.rb` (from `packaging/homebrew/swiftflash.rb.template`). It prints the tag, GitHub release and
-tap steps but does not run them.
-
-## Package Layout
+## Package layout
 
 ```text
 Sources/
-  SwiftFlashCore/
-  swiftflash/
+  SwiftFlashCore/     models, persistence, device scanning, Disk Arbitration, image download/unpack/checksums,
+                      image sources, UUID metadata, flash service
+  swiftflash/         CLI entry point, command execution, progress output
 Tests/
   SwiftFlashCoreTests/
+docs/                 file formats and guides
+scripts/              release script
+packaging/homebrew/   formula template
 ```
 
-- `SwiftFlashCore` contains models, persistence, device scanning, Disk Arbitration helpers, UUID metadata handling, and the flash service.
-- `swiftflash` contains the CLI entrypoint and command execution wiring.
+## Documentation
 
-## Current Limitations
+- [docs/uuid-file.md](docs/uuid-file.md) — the `/.uuid` metadata file and how images can identify themselves
+- [docs/build-server.md](docs/build-server.md) — what a build server should provide for SwiftFlash
+- [RELEASE.md](RELEASE.md) — release contents and planned work
 
-- The project is currently macOS-only.
-- Flashing requires the process to already run as root, typically via `sudo`.
-- Real-device flashing has not yet been fully validated on multiple hardware types.
+## Current limitations
+
+- macOS only; the Homebrew build is arm64 only.
+- Flashing and verifying require root, typically via `sudo`.
+- `.gz` images are not supported yet.
+- Tested mainly with SD cards in USB card readers; more hardware coverage is welcome.
 
 ## License
 
