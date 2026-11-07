@@ -174,7 +174,8 @@ The implemented flashing flow is:
 10. Write a new `/.uuid` JSON file if a writable mounted partition is available, keeping the `image` block an image may ship in its own `/.uuid` ([format](docs/uuid-file.md)).
 11. If no writable filesystem is available and enough slack remains after the image, write trailer metadata in the last 4 KiB of the device.
 12. Persist image usage, device inventory, and flash history.
-13. Move a fresh download to the Trash for reuse and delete the other temporary files.
+13. Unmount all partitions of the medium so it can be removed safely (also after `verify`).
+14. Move a fresh download to the Trash for reuse and delete the other temporary files.
 
 ## Package Layout
 

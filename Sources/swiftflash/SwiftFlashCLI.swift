@@ -80,6 +80,7 @@ struct SwiftFlashCLI {
                 }
                 print("Metadata stored in: \(completion.writeResult.storageDescription)")
                 print("Flash completed")
+                await unmountForRemoval(device, services: services)
 
             case .verify(let imagePath, let devicePath):
                 guard geteuid() == 0 else {
@@ -101,6 +102,7 @@ struct SwiftFlashCLI {
                 )
                 verifyProgress.finish(status: "Verification complete")
                 print("Verification successful")
+                await unmountForRemoval(device, services: services)
 
             case .images:
                 let images = services.imageStore.allImages()
@@ -256,6 +258,16 @@ struct SwiftFlashCLI {
             }
         }
         return prepared
+    }
+
+    /// Unmounts all partitions so the medium can be pulled out safely. A failure only produces a warning.
+    private static func unmountForRemoval(_ device: DiskCandidate, services: Services) async {
+        do {
+            try await services.deviceManager.unmountWholeDisk(device)
+            print("Unmounted \(device.devicePath), the medium can be removed")
+        } catch {
+            print("Warning: could not unmount \(device.devicePath) (\(error.localizedDescription)); eject it in Finder before removing it")
+        }
     }
 
     private static func cleanup(_ prepared: PreparedImage, services: Services) {
