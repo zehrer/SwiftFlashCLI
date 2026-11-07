@@ -3,9 +3,10 @@ import Foundation
 public final class PromptRenderer: @unchecked Sendable {
     public init() {}
 
-    public func selectImage(from images: [RememberedImage]) throws -> String {
-        if images.isEmpty {
-            print("No remembered images. Enter a path to an image file:")
+    /// Returns a path, URL or `source:` (to browse that source).
+    public func selectImage(from images: [RememberedImage], sources: [ImageSource] = []) throws -> String {
+        if images.isEmpty && sources.isEmpty {
+            print("No remembered images. Enter a path or URL to an image file:")
             guard let input = readLine(strippingNewline: true), !input.isEmpty else {
                 throw FlashError.cancelled
             }
@@ -13,17 +14,24 @@ public final class PromptRenderer: @unchecked Sendable {
         }
 
         print("Select an image:")
-        print("  0) Enter a new path")
+        print("  0) Enter a new path or URL")
         for (index, image) in images.enumerated() {
             print("  \(index + 1)) \(image.displayName) [\(image.path)]")
         }
-        guard let line = readLine(strippingNewline: true),
-              let selection = Int(line)
-        else {
+        for source in sources {
+            print("  \(source.name)) Browse \(source.url)")
+        }
+        guard let line = readLine(strippingNewline: true)?.trimmingCharacters(in: .whitespaces) else {
+            throw FlashError.cancelled
+        }
+        if let source = sources.first(where: { $0.name == line }) {
+            return "\(source.name):"
+        }
+        guard let selection = Int(line) else {
             throw FlashError.cancelled
         }
         if selection == 0 {
-            print("Enter a path to an image file:")
+            print("Enter a path or URL to an image file:")
             guard let input = readLine(strippingNewline: true), !input.isEmpty else {
                 throw FlashError.cancelled
             }
@@ -34,6 +42,54 @@ public final class PromptRenderer: @unchecked Sendable {
             throw FlashError.cancelled
         }
         return images[index].path
+    }
+
+    public func selectFamily(_ families: [RemoteImageFamily], source: ImageSource) throws -> RemoteImageFamily {
+        print("Images on \(source.name) (\(source.url)):")
+        for (index, family) in families.enumerated() {
+            print("  \(index + 1)) \(Self.familyLine(family))")
+        }
+        guard let line = readLine(strippingNewline: true), let selection = Int(line),
+              families.indices.contains(selection - 1)
+        else {
+            throw FlashError.cancelled
+        }
+        return families[selection - 1]
+    }
+
+    /// Lets the user pick a build; Enter takes the newest.
+    public func selectBuild(of family: RemoteImageFamily) throws -> RemoteImage {
+        guard family.builds.count > 1 else {
+            return family.newest
+        }
+        print("Builds of \(family.name) (Enter = newest):")
+        for (index, build) in family.builds.enumerated() {
+            print("  \(index + 1)) \(Self.buildLine(build))")
+        }
+        guard let line = readLine(strippingNewline: true)?.trimmingCharacters(in: .whitespaces) else {
+            throw FlashError.cancelled
+        }
+        if line.isEmpty {
+            return family.newest
+        }
+        guard let selection = Int(line), family.builds.indices.contains(selection - 1) else {
+            throw FlashError.cancelled
+        }
+        return family.builds[selection - 1]
+    }
+
+    public static func familyLine(_ family: RemoteImageFamily) -> String {
+        let count = family.builds.count == 1 ? "1 build" : "\(family.builds.count) builds"
+        return "\(family.name)  newest: \(buildLabel(family.newest))  (\(count))"
+    }
+
+    public static func buildLine(_ build: RemoteImage) -> String {
+        "\(build.fileName)\(build.date.map { "  \($0.formatted(date: .abbreviated, time: .shortened))" } ?? "")"
+    }
+
+    static func buildLabel(_ build: RemoteImage) -> String {
+        let version = build.version ?? build.fileName
+        return build.date.map { "\(version), \($0.formatted(date: .abbreviated, time: .shortened))" } ?? version
     }
 
     public func selectDevice(

@@ -15,7 +15,9 @@ struct SwiftFlashCLI {
                 deviceManager: DiskArbitrationManager(),
                 prompt: PromptRenderer(),
                 uuidService: UUIDMetadataService(),
-                imagePreparer: ImagePreparer(trashStore: TrashedDownloadStore(configStore: configStore))
+                imagePreparer: ImagePreparer(trashStore: TrashedDownloadStore(configStore: configStore)),
+                sourceStore: ImageSourceStore(configStore: configStore),
+                sourceBrowser: ImageSourceBrowser()
             )
         } catch {
             fputs("\(error.localizedDescription)\n", stderr)
@@ -209,6 +211,45 @@ struct SwiftFlashCLI {
             case .version:
                 print("swiftflash \(SwiftFlashVersion.current)")
 
+            case .sourceList:
+                let sources = services.sourceStore.allSources()
+                if sources.isEmpty {
+                    print("No image sources. Add one with: swiftflash source add <name> <url>")
+                } else {
+                    for source in sources {
+                        print("\(source.name)\t\(source.url)")
+                    }
+                }
+
+            case .sourceAdd(let name, let url):
+                try services.sourceStore.add(ImageSource(name: name, url: url))
+                print("Added source \(name). Flash the newest build with: sudo swiftflash \(name):<family>")
+
+            case .sourceRemove(let name):
+                guard try services.sourceStore.remove(named: name) else {
+                    throw FlashError.usage("No source named \(name)")
+                }
+                print("Removed source \(name)")
+
+            case .sourceBrowse(let name, let familyQuery):
+                guard let source = services.sourceStore.source(named: name) else {
+                    throw FlashError.usage("No source named \(name)")
+                }
+                let families = try await services.sourceBrowser.families(in: source)
+                if let familyQuery {
+                    let family = try RemoteImageNaming.family(matching: familyQuery, in: families)
+                    print("\(family.name):")
+                    for build in family.builds {
+                        print("  \(PromptRenderer.buildLine(build))")
+                    }
+                } else if families.isEmpty {
+                    print("No images found at \(source.url)")
+                } else {
+                    for family in families {
+                        print(PromptRenderer.familyLine(family))
+                    }
+                }
+
             case .help:
                 print(HelpRenderer.text)
         }
@@ -243,7 +284,11 @@ struct SwiftFlashCLI {
     }
 
     private static func resolveImage(path: String?, services: Services) async throws -> PreparedImage {
-        let resolvedPath = try path ?? services.prompt.selectImage(from: services.imageStore.allImages())
+        let selected = try path ?? services.prompt.selectImage(
+            from: services.imageStore.allImages(),
+            sources: services.sourceStore.allSources()
+        )
+        let resolvedPath = try await resolveSourceReference(selected, services: services)
         let progress = PreparationProgress()
         let prepared = try await services.imagePreparer.prepare(source: resolvedPath) { update in
             progress.update(update)
@@ -261,6 +306,33 @@ struct SwiftFlashCLI {
             }
         }
         return prepared
+    }
+
+    /// Turns `source:family` into the URL of the newest build, or lets the user browse for `source:`.
+    /// Anything that is not a source reference is returned unchanged.
+    private static func resolveSourceReference(_ text: String, services: Services) async throws -> String {
+        guard let reference = ImageSourceReference.parse(text, sources: services.sourceStore.allSources()),
+              let source = services.sourceStore.source(named: reference.sourceName)
+        else {
+            return text
+        }
+        print("Reading images from \(source.url)…")
+        let families = try await services.sourceBrowser.families(in: source)
+        guard !families.isEmpty else {
+            throw FlashError.usage("No images found at \(source.url)")
+        }
+
+        let image: RemoteImage
+        if reference.family.isEmpty {
+            let family = try services.prompt.selectFamily(families, source: source)
+            image = try services.prompt.selectBuild(of: family)
+        } else if let exact = families.flatMap(\.builds).first(where: { $0.fileName == reference.family }) {
+            image = exact
+        } else {
+            image = try RemoteImageNaming.family(matching: reference.family, in: families).newest
+        }
+        print("\(text) → \(PromptRenderer.buildLine(image))")
+        return image.url.absoluteString
     }
 
     /// Unmounts all partitions so the medium can be pulled out safely. A failure only produces a warning.
@@ -451,6 +523,8 @@ struct SwiftFlashCLI {
         let prompt: PromptRenderer
         let uuidService: UUIDMetadataService
         let imagePreparer: ImagePreparer
+        let sourceStore: ImageSourceStore
+        let sourceBrowser: ImageSourceBrowser
 
         var flashService: FlashService {
             FlashService(

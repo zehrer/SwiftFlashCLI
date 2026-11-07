@@ -163,6 +163,47 @@ public final class ImageCatalogStore {
     }
 }
 
+public final class ImageSourceStore {
+    private let configStore: AppConfigStore
+
+    public init(configStore: AppConfigStore) {
+        self.configStore = configStore
+    }
+
+    public func allSources() -> [ImageSource] {
+        configStore.currentConfig().imageSources.sorted { $0.name < $1.name }
+    }
+
+    public func source(named name: String) -> ImageSource? {
+        configStore.currentConfig().imageSources.first { $0.name == name }
+    }
+
+    /// Adds a source or replaces the URL of an existing one with the same name.
+    public func add(_ source: ImageSource) throws {
+        guard ImageSource.isValidName(source.name) else {
+            throw FlashError.usage("Source names may only contain letters, digits, '-' and '_': \(source.name)")
+        }
+        guard ImagePreparer.isRemote(source.url), source.directoryURL != nil else {
+            throw FlashError.usage("Source URL must be an http(s) directory URL: \(source.url)")
+        }
+        try configStore.update { config in
+            config.imageSources.removeAll { $0.name == source.name }
+            config.imageSources.append(source)
+        }
+    }
+
+    @discardableResult
+    public func remove(named name: String) throws -> Bool {
+        var removed = false
+        try configStore.update { config in
+            let before = config.imageSources.count
+            config.imageSources.removeAll { $0.name == name }
+            removed = config.imageSources.count != before
+        }
+        return removed
+    }
+}
+
 /// Remembers which downloaded remote images were moved to the Trash, so they can be reused.
 public final class TrashedDownloadStore {
     private let configStore: AppConfigStore

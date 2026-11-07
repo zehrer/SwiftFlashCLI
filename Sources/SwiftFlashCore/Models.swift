@@ -8,6 +8,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
     public var knownFlashMedia: [KnownFlashMedia]
     public var flashHistory: [FlashHistoryEntry]
     public var trashedDownloads: [TrashedDownload]
+    public var imageSources: [ImageSource]
 
     public init(
         mediaTypes: [MediaTypeDefinition] = MediaTypeDefinition.preconfiguredDefaults(),
@@ -15,7 +16,8 @@ public struct AppConfig: Codable, Equatable, Sendable {
         knownPhysicalDevices: [KnownPhysicalDevice] = [],
         knownFlashMedia: [KnownFlashMedia] = [],
         flashHistory: [FlashHistoryEntry] = [],
-        trashedDownloads: [TrashedDownload] = []
+        trashedDownloads: [TrashedDownload] = [],
+        imageSources: [ImageSource] = []
     ) {
         self.mediaTypes = mediaTypes
         self.rememberedImages = rememberedImages
@@ -23,6 +25,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         self.knownFlashMedia = knownFlashMedia
         self.flashHistory = flashHistory
         self.trashedDownloads = trashedDownloads
+        self.imageSources = imageSources
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -32,6 +35,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         case knownFlashMedia
         case flashHistory
         case trashedDownloads
+        case imageSources
     }
 
     public init(from decoder: Decoder) throws {
@@ -43,6 +47,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         knownFlashMedia = try container.decodeIfPresent([KnownFlashMedia].self, forKey: .knownFlashMedia) ?? []
         flashHistory = try container.decodeIfPresent([FlashHistoryEntry].self, forKey: .flashHistory) ?? []
         trashedDownloads = try container.decodeIfPresent([TrashedDownload].self, forKey: .trashedDownloads) ?? []
+        imageSources = try container.decodeIfPresent([ImageSource].self, forKey: .imageSources) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -53,6 +58,7 @@ public struct AppConfig: Codable, Equatable, Sendable {
         try container.encode(knownFlashMedia, forKey: .knownFlashMedia)
         try container.encode(flashHistory, forKey: .flashHistory)
         try container.encode(trashedDownloads, forKey: .trashedDownloads)
+        try container.encode(imageSources, forKey: .imageSources)
     }
 }
 
@@ -678,6 +684,10 @@ public enum FlashCommand: Equatable, Sendable {
     case history
     case historyClear
     case version
+    case sourceList
+    case sourceAdd(name: String, url: String)
+    case sourceRemove(name: String)
+    case sourceBrowse(name: String, family: String?)
     case help
 }
 

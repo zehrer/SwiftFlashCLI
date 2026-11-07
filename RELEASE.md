@@ -47,6 +47,8 @@ Included requirements:
 - `swiftflash version` / `--version`
 - config file is handed back to the invoking user when running via `sudo`
 - `scripts/release.sh` builds the release archive and the Homebrew formula
+- image sources: `swiftflash source add/list/browse/remove`, short form `<source>:<family>` for the newest build, browsing in the interactive selection (reads `index.json` or the directory listing)
+- `docs/build-server.md`: what a build server should provide for SwiftFlash
 
 Known gaps:
 - real hardware validation is still limited

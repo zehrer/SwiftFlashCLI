@@ -24,6 +24,8 @@ public enum CLIParser {
             return try parseHistoryArguments(Array(args.dropFirst()))
         case "version", "--version":
             return .version
+        case "source", "sources":
+            return try parseSourceArguments(Array(args.dropFirst()))
         case "help", "--help", "-h":
             return .help
         default:
@@ -130,6 +132,34 @@ public enum CLIParser {
 
         let (imagePath, devicePath) = parseImageAndDeviceArguments(positional)
         return .flash(imagePath: imagePath, devicePath: devicePath, skipConfirmation: skipConfirmation)
+    }
+
+    private static func parseSourceArguments(_ args: [String]) throws -> FlashCommand {
+        guard let subcommand = args.first else {
+            return .sourceList
+        }
+
+        switch subcommand {
+        case "list":
+            return .sourceList
+        case "add":
+            guard args.count == 3 else {
+                throw FlashError.usage("Usage: swiftflash source add <name> <url>")
+            }
+            return .sourceAdd(name: args[1], url: args[2])
+        case "remove":
+            guard args.count == 2 else {
+                throw FlashError.usage("Usage: swiftflash source remove <name>")
+            }
+            return .sourceRemove(name: args[1])
+        case "browse":
+            guard args.count == 2 || args.count == 3 else {
+                throw FlashError.usage("Usage: swiftflash source browse <name> [family]")
+            }
+            return .sourceBrowse(name: args[1], family: args.count == 3 ? args[2] : nil)
+        default:
+            throw FlashError.usage("Unknown source subcommand: \(subcommand)")
+        }
     }
 
     private static func parseImagesArguments(_ args: [String]) throws -> FlashCommand {
@@ -309,6 +339,14 @@ public struct HelpRenderer {
     Set or clear a custom name for a remembered medium:
       swiftflash media name <device-uuid> <name>
       swiftflash media clear-name <device-uuid>
+
+    Image sources (server directories with images):
+      swiftflash source add <name> <url>
+      swiftflash source list
+      swiftflash source browse <name> [family]
+      swiftflash source remove <name>
+      sudo swiftflash <name>:<family> [/dev/diskX]   flash the newest build of a family
+      sudo swiftflash <name>: [/dev/diskX]           choose family and build interactively
 
     Show the version:
       swiftflash version

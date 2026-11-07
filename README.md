@@ -133,6 +133,23 @@ sudo swiftflash http://192.168.178.120:8080/redox/sdcard-redox.img.xz /dev/diskX
 - The remembered image list stores the original location (URL or `.xz` path), so the same source can be selected again later.
 - The temporary directory needs enough free space for the unpacked image.
 
+### Image sources
+
+A build server directory can be registered once and then used by short names:
+
+```bash
+swiftflash source add redox http://homenodellm:8080/sdcard/
+swiftflash source browse redox              # families with their newest build
+swiftflash source browse redox t18-direct   # all builds of one family
+sudo swiftflash redox:t18-direct            # flash the newest build of that family
+sudo swiftflash redox:                      # choose family and build interactively
+```
+
+- The family can be given in full (`redox-rpi-t18-direct`), as a suffix (`t18-direct`) or as a unique part (`t18`).
+- The interactive image selection also offers `redox) Browse …`.
+- SwiftFlash reads `index.json` if the server has one, otherwise the directory listing plus `Last-Modified`.
+- What a build server should provide is described in [docs/build-server.md](docs/build-server.md); hand it to the team running the server.
+
 ### Interactive behavior
 
 - If no image is provided, the tool shows remembered images and allows entering a new path.
